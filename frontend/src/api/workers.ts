@@ -79,7 +79,7 @@ export const workersApi = {
   // Resources (for Pages bindings)
   getKvNamespaces: (accountId: number) => apiClient.get(`/workers/${accountId}/resources/kv`),
   getD1Databases: (accountId: number) => apiClient.get(`/workers/${accountId}/resources/d1`),
-  getR2Buckets: (accountId: number) => apiClient.get(`/workers/${accountId}/resources/r2`),
+  getR2Buckets: (accountId: number, config?: any) => apiClient.get(`/workers/${accountId}/resources/r2`, config),
   getZones: (accountId: number) => apiClient.get(`/workers/${accountId}/resources/zones`, { timeout: 60000 }),
   updatePagesBindings: (accountId: number, name: string, deploymentConfigs: any) =>
     apiClient.put(`/workers/${accountId}/pages/${name}/bindings`, { deployment_configs: deploymentConfigs }),

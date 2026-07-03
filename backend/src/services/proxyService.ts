@@ -30,8 +30,8 @@ export function getHttpAgent(): Agent | undefined {
   if (url === cachedUrl && cachedAgent) return cachedAgent;
 
   cachedAgent = isSocks(url)
-    ? new SocksProxyAgent(url)
-    : new HttpsProxyAgent(url);
+    ? new SocksProxyAgent(url, { timeout: 30000 })
+    : new HttpsProxyAgent(url, { timeout: 30000 });
   cachedUrl = url;
   return cachedAgent;
 }
@@ -39,8 +39,21 @@ export function getHttpAgent(): Agent | undefined {
 export async function proxyFetch(input: string | URL, init?: any): Promise<Response> {
   const agent = getHttpAgent();
   if (!agent) return fetch(input, init);
-  const resp = await nodeFetch(input.toString(), { ...init, agent });
-  return resp as unknown as Response;
+
+  const doFetch = () => nodeFetch(input.toString(), { ...init, agent });
+  try {
+    const resp = await doFetch();
+    return resp as unknown as Response;
+  } catch (err: any) {
+    if (err.code === 'ECONNRESET' || err.code === 'EPIPE') {
+      cachedAgent = undefined;
+      cachedUrl = '';
+      const newAgent = getHttpAgent();
+      const resp = await nodeFetch(input.toString(), { ...init, agent: newAgent });
+      return resp as unknown as Response;
+    }
+    throw err;
+  }
 }
 
 export async function testProxyConnection(proxyUrl: string): Promise<{ latency_ms: number; status: number }> {
