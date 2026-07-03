@@ -11,6 +11,7 @@ import { appLogger } from '../services/logger';
 import { createAuditLog } from '../models/auditLog';
 import { config } from '../config';
 import { getHttpAgent } from '../services/proxyService';
+import { clearExhausted } from '../models/quotaUsage';
 
 const router = Router();
 
@@ -190,6 +191,22 @@ router.post('/:id/test', async (req: Request, res: Response, next: NextFunction)
     // 测试成功，更新状态为活跃
     updateAccountStatus(accountId, true);
     res.json({ success: true, user });
+  } catch (err) { next(err); }
+});
+
+// ============ 清除 AI 配额耗尽标记 ============
+router.post('/:id/clear-exhausted', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = parseInt(req.params.id as string, 10);
+    if (isDemoAccount(id)) {
+      res.status(403).json({ error: { code: 'DEMO_PROTECTED', message: '演示账户不可操作' } });
+      return;
+    }
+    const account = getAccountById(id);
+    if (!account) { res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Account not found' } }); return; }
+    clearExhausted(id, 'ai_neurons');
+    createAuditLog(id, 'clear_exhausted', account.name, 'ai_neurons', 'success');
+    res.json({ success: true, message: '已清除 AI 配额耗尽标记' });
   } catch (err) { next(err); }
 });
 

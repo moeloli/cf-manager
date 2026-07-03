@@ -4,8 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "dev": "nodemon --exec ts-node src/index.ts",
-    "build": "tsc",
+    "dev": "node ../scripts/sync-pricing.js && nodemon --exec ts-node src/index.ts",
+    "build": "node ../scripts/sync-pricing.js && tsc",
     "start": "node dist/index.js"
   },
   "keywords": [],

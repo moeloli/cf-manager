@@ -24,7 +24,7 @@ app.post('/', async (c) => {
 
   const account = accountId
     ? await getAccountById(c.env.DB, accountId)
-    : await selectBestAccount(c.env.DB, c.env.ENCRYPTION_KEY, 'browser_render_seconds');
+    : await selectBestAccount(c.env, 'browser_render_seconds');
 
   if (!account) return c.json({ error: { message: 'No available account', code: 'NO_ACCOUNTS' } }, 503);
 

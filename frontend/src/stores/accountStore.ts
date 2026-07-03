@@ -85,6 +85,11 @@ export const useAccountStore = defineStore('accounts', () => {
     await fetchAccounts();
   }
 
+  async function clearExhausted(id: number) {
+    await accountsApi.clearExhausted(id);
+    await fetchAccounts();
+  }
+
   async function importCsv(file: File, skipVerify = false) {
     const { data } = await accountsApi.importCsv(file, skipVerify);
     await fetchAccounts();
@@ -95,6 +100,6 @@ export const useAccountStore = defineStore('accounts', () => {
     accounts, quota, loading,
     page, pageSize, filter, search, total, counts,
     fetchAccounts, setPage, setPageSize, setFilter, setSearch,
-    createAccount, deleteAccount, testAccount, testBatch, updateFeatures, importCsv,
+    createAccount, deleteAccount, testAccount, testBatch, updateFeatures, clearExhausted, importCsv,
   };
 });

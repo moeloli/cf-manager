@@ -66,7 +66,7 @@ const frontendDir = path.resolve(__dirname, '../frontend');
 const publicDir = path.resolve(__dirname, 'public');
 const distDir = path.resolve(frontendDir, 'dist');
 
-const totalSteps = 5 + (OBFUSCATE_FRONTEND ? 1 : 0) + (OBFUSCATE_WORKER ? 1 : 0);
+const totalSteps = 6 + (OBFUSCATE_FRONTEND ? 1 : 0) + (OBFUSCATE_WORKER ? 1 : 0);
 let step = 0;
 
 console.log(`\nObfuscation: frontend=${OBFUSCATE_FRONTEND ? 'ON' : 'OFF'}, worker=${OBFUSCATE_WORKER ? 'ON' : 'OFF'}`);
@@ -93,6 +93,9 @@ if (OBFUSCATE_FRONTEND) {
   const frontendCount = obfuscateDir(assetsDir, obfuscatorOptions);
   console.log(`  Obfuscated ${frontendCount} frontend files`);
 }
+
+console.log(`[${++step}/${totalSteps}] Syncing shared pricing data...`);
+execSync('node ../scripts/sync-pricing.js', { cwd: __dirname, stdio: 'inherit' });
 
 console.log(`[${++step}/${totalSteps}] Bundling worker backend...`);
 execSync('npx esbuild src/index.ts --bundle --outfile=public/_worker.js --format=esm --target=es2022 --minify', {

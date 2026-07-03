@@ -38,6 +38,7 @@ export function initDb(): void {
       resource    TEXT NOT NULL,
       date        DATE NOT NULL,
       count       INTEGER DEFAULT 0,
+      exhausted   INTEGER DEFAULT 0,
       UNIQUE(account_id, resource, date)
     );
 
@@ -79,6 +80,12 @@ export function initDb(): void {
   const cols = db.prepare("PRAGMA table_info('accounts')").all() as { name: string }[];
   if (!cols.find(c => c.name === 'enabled_features')) {
     db.exec("ALTER TABLE accounts ADD COLUMN enabled_features TEXT DEFAULT 'ai,workers,browser_render,dns,storage'");
+  }
+
+  // Migrate quota_usage: add exhausted column if not exists
+  const quotaCols = db.prepare("PRAGMA table_info('quota_usage')").all() as { name: string }[];
+  if (!quotaCols.find(c => c.name === 'exhausted')) {
+    db.exec("ALTER TABLE quota_usage ADD COLUMN exhausted INTEGER DEFAULT 0");
   }
 }
 

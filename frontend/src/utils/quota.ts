@@ -2,6 +2,7 @@ export interface Resource {
   resource: string;
   count: number;
   limit: number;
+  exhausted?: boolean; // true = 已耗尽
 }
 
 export const resourceOrder = ['workers_requests', 'ai_neurons', 'browser_render_seconds'] as const;

@@ -154,7 +154,7 @@
 
 <script setup lang="ts">
 import { ref, h, computed, onMounted } from 'vue';
-import { NButton, NSpace, NTag, useMessage } from 'naive-ui';
+import { NButton, NSpace, NProgress, NTag, useMessage } from 'naive-ui';
 import type { DataTableColumns } from 'naive-ui';
 import type { UploadFileInfo } from 'naive-ui';
 import { useAccountStore } from '../stores/accountStore';
@@ -282,6 +282,15 @@ async function handleTest(row: any) {
   message.success('连接测试成功');
 }
 
+async function handleClearExhausted(row: any) {
+  try {
+    await accountStore.clearExhausted(row.id);
+    message.success('已清除 AI 配额耗尽标记');
+  } catch (e: any) {
+    message.error(`清除失败：${e?.message || e}`);
+  }
+}
+
 async function handleTestBatch() {
   batchTesting.value = true;
   batchResult.value = null;
@@ -389,15 +398,48 @@ const columns: DataTableColumns<any> = [
     }
     return h(NTag, { size: 'small', type: row.is_active ? 'success' : 'default' }, { default: () => row.is_active ? '活跃' : '未验证' });
   }},
+  { title: 'AI 配额', key: 'aiQuota', width: 160, render: (row) => {
+    const quotaItem = accountStore.quota.find((q: any) => q.accountId === row.id);
+    if (!quotaItem || !quotaItem.resources) return h('span', { style: { color: '#999', fontSize: '12px' } }, '—');
+    const aiResource = quotaItem.resources.find((r: any) => r.resource === 'ai_neurons');
+    if (!aiResource) return h('span', { style: { color: '#999', fontSize: '12px' } }, '—');
+    const exhausted = aiResource.exhausted;
+    const pct = Math.min(100, Math.round(((aiResource.count || 0) / (aiResource.limit || 1)) * 100));
+    return h('div', { style: { display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '100px' } }, [
+      h('div', { style: { display: 'flex', alignItems: 'center', gap: '6px' } }, [
+        exhausted
+          ? h(NTag, { size: 'small', type: 'error', bordered: false }, { default: () => '已耗尽' })
+          : h('span', { style: { fontSize: '12px', color: '#666' } }, `${pct}%`),
+      ]),
+      h(NProgress, {
+        type: 'line',
+        percentage: pct,
+        height: 6,
+        showIndicator: false,
+        status: exhausted ? 'error' : (pct > 90 ? 'warning' : 'success'),
+      }),
+    ]);
+  }},
   {
-    title: '操作', key: 'actions', width: 220,
-    render: (row) => h(NSpace, { size: 4 }, {
-      default: () => [
-        h(NButton, { size: 'small', disabled: row.is_demo, onClick: () => openFeatureEditor(row) }, { default: () => '功能' }),
-        h(NButton, { size: 'small', onClick: () => handleTest(row) }, { default: () => '测试' }),
-        h(NButton, { size: 'small', type: 'error', disabled: row.is_demo, onClick: () => handleDelete(row) }, { default: () => '删除' }),
-      ],
-    }),
+    title: '操作', key: 'actions', width: 300,
+    render: (row) => {
+      const isExhausted = (() => {
+        const quotaItem = accountStore.quota.find((q: any) => q.accountId === row.id);
+        if (!quotaItem || !quotaItem.resources) return false;
+        const aiResource = quotaItem.resources.find((r: any) => r.resource === 'ai_neurons');
+        return aiResource?.exhausted;
+      })();
+      return h(NSpace, { size: 4 }, {
+        default: () => [
+          h(NButton, { size: 'small', disabled: row.is_demo, onClick: () => openFeatureEditor(row) }, { default: () => '功能' }),
+          h(NButton, { size: 'small', onClick: () => handleTest(row) }, { default: () => '测试' }),
+          isExhausted
+            ? h(NButton, { size: 'small', type: 'warning', disabled: row.is_demo, onClick: () => handleClearExhausted(row) }, { default: () => '清除耗尽' })
+            : null,
+          h(NButton, { size: 'small', type: 'error', disabled: row.is_demo, onClick: () => handleDelete(row) }, { default: () => '删除' }),
+        ].filter(Boolean),
+      });
+    },
   },
 ];
 

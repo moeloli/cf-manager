@@ -25,6 +25,9 @@
       <n-tag v-if="globalStats.nearExhaustion > 0" type="warning">
         {{ globalStats.nearExhaustion }} 快耗尽
       </n-tag>
+      <n-tag v-if="globalStats.exhaustedAccounts > 0" type="error">
+        {{ globalStats.exhaustedAccounts }} 已耗尽
+      </n-tag>
       <n-tag type="info">AI 总量 {{ globalStats.aiNeuronsTotal.toLocaleString() }}</n-tag>
     </n-space>
 
@@ -122,6 +125,10 @@ const globalStats = computed(() => {
     }),
   ).length;
 
+  const exhaustedAccounts = accounts.filter((acct: any) =>
+    acct.resources.some((r: any) => r.exhausted),
+  ).length;
+
   const aiNeuronsTotal = accounts.reduce((sum: number, acct: any) => {
     const aiResource = acct.resources.find(
       (r: any) => r.resource === 'ai_neurons',
@@ -129,7 +136,7 @@ const globalStats = computed(() => {
     return sum + (aiResource?.count || 0);
   }, 0);
 
-  return { totalAccounts, nearExhaustion, aiNeuronsTotal };
+  return { totalAccounts, nearExhaustion, exhaustedAccounts, aiNeuronsTotal };
 });
 
 const auditLogs = ref<any[]>([]);

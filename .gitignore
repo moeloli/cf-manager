@@ -17,3 +17,15 @@ backups/
 
 worker/public/
 worker/cf-manager.zip
+
+# Ignore generated pricing data files (managed by sync script)
+backend/src/data/
+worker/src/data/
+
+# Ignore AI tool configuration directories
+.codebuddy/
+.cursor/
+.claude/
+.aider/
+.windsurf/
+.github/copilot/

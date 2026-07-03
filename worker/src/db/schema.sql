@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS quota_usage (
   resource    TEXT NOT NULL,
   date        DATE NOT NULL,
   count       INTEGER DEFAULT 0,
+  exhausted   INTEGER DEFAULT 0,
   UNIQUE(account_id, resource, date)
 );
 

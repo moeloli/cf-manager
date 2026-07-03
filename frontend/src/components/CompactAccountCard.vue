@@ -8,10 +8,16 @@
             <template #trigger>
               <span class="compact-card__dot" :style="{ backgroundColor: dotColor(item) }" />
             </template>
-            {{ resourceLabel(item.resource) }}: {{ calcPercentage(item) }}%
+            {{ resourceLabel(item.resource) }}: {{ calcPercentage(item) }}%<span v-if="item.exhausted">（已耗尽）</span>
           </n-tooltip>
           <span v-for="i in emptyDots" :key="'empty-' + i" class="compact-card__dot" style="background-color: #ccc" />
         </div>
+        <n-tooltip v-if="hasExhausted" trigger="hover">
+          <template #trigger>
+            <span class="compact-card__exhausted-dot" />
+          </template>
+          有资源已耗尽
+        </n-tooltip>
       </div>
     </template>
 
@@ -20,6 +26,7 @@
       <div v-for="item in orderedResources" :key="item.resource" class="compact-card__popover-row">
         <div class="compact-card__popover-label">
           <span>{{ resourceLabel(item.resource) }}</span>
+          <n-tag v-if="item.exhausted" size="small" type="error" :bordered="false" style="margin-left: 6px;">已耗尽</n-tag>
           <span class="compact-card__popover-value">{{ formatValue(item) }}</span>
         </div>
         <n-progress
@@ -27,7 +34,7 @@
           :percentage="calcPercentage(item)"
           :height="14"
           :show-indicator="false"
-          :status="progressStatus(item)"
+          :status="item.exhausted ? 'error' : progressStatus(item)"
         />
       </div>
       <div v-if="!hasResources" style="color: #999; font-size: 13px;">暂无资源数据</div>
@@ -42,6 +49,7 @@ interface Resource {
   resource: string;
   count: number;
   limit: number;
+  exhausted?: boolean;
 }
 
 const props = defineProps<{
@@ -80,6 +88,7 @@ function formatValue(r: Resource) {
 }
 
 function dotColor(r: Resource) {
+  if (r.exhausted) return '#e03050';
   const pct = calcPercentage(r);
   if (pct > 100) return '#c03030';
   if (pct > 90) return '#d03050';
@@ -102,6 +111,8 @@ const orderedResources = computed(() => {
 const emptyDots = computed(() => Math.max(0, 3 - orderedResources.value.length));
 
 const hasResources = computed(() => props.resources && props.resources.length > 0);
+
+const hasExhausted = computed(() => props.resources && props.resources.some(r => r.exhausted));
 
 const displayName = computed(() => {
   const name = props.accountName;
@@ -155,6 +166,20 @@ const displayName = computed(() => {
   height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
+}
+
+.compact-card__exhausted-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background-color: #e03050;
+  animation: pulse-exhausted 1.5s infinite;
+}
+
+@keyframes pulse-exhausted {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
 }
 
 .compact-card__popover {

@@ -3,9 +3,11 @@ import { cors } from 'hono/cors';
 import type { Env } from './types';
 import { authMiddleware } from './middleware/auth';
 import { errorHandler } from './middleware/errorHandler';
+import { v1ErrorHandler } from './middleware/v1ErrorHandler';
+import { requestIdMiddleware } from './middleware/requestId';
 import { responseWrapper } from './middleware/responseWrapper';
 import { getRecentLogs } from './db/models';
-import { getQuotaSummary, syncUsageFromCloudflare } from './services/quotaTracker';
+import { getQuotaSummary, syncUsageFromCloudflare, invalidateAiCache } from './services/quotaTracker';
 import { getFakeNginxPage } from './pages/fakeNginx';
 
 import accountsRouter from './routes/accounts';
@@ -29,11 +31,15 @@ app.use('*', errorHandler);
 
 // OpenAI-compatible routes (MUST be registered BEFORE responseWrapper)
 // These routes return OpenAI-standard format and should not be wrapped
+app.use('/v1/*', requestIdMiddleware);
 app.use('/v1/*', authMiddleware);
 app.route('/v1', openaiRouter);
+app.use('/v1/*', v1ErrorHandler);
 
+app.use('/api/v1/*', requestIdMiddleware);
 app.use('/api/v1/*', authMiddleware);
 app.route('/api/v1', openaiRouter);
+app.use('/api/v1/*', v1ErrorHandler);
 
 // Other API routes (with responseWrapper)
 app.use('/api/*', responseWrapper);
@@ -78,6 +84,7 @@ app.route('/api/storage', storageRouter);
 
 app.get('/api/quota', async (c) => {
   await syncUsageFromCloudflare(c.env.DB, c.env.ENCRYPTION_KEY);
+  await invalidateAiCache(c.env);
   const summary = await getQuotaSummary(c.env.DB, c.env.ENCRYPTION_KEY);
   return c.json(summary);
 });

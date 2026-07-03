@@ -14,7 +14,7 @@ export async function getAvailableModels(account: Account, taskFilter?: string):
     const m = model as any;
     // Log first model structure for debugging
     if (count === 0) {
-      console.log('[AI Models] Sample model structure:', JSON.stringify(m, null, 2).slice(0, 500));
+      appLogger.debug(`[AI Models] Sample model structure: ${JSON.stringify(m, null, 2).slice(0, 500)}`);
     }
     count++;
     // 如果指定了任务过滤，只返回匹配的模型
@@ -28,7 +28,7 @@ export async function getAvailableModels(account: Account, taskFilter?: string):
     }
     models.push(m);
   }
-  console.log(`[AI Models] Total: ${count}, Filtered (${taskFilter}): ${models.length}`);
+  appLogger.debug(`[AI Models] Total: ${count}, Filtered (${taskFilter}): ${models.length}`);
   return models;
 }
 
@@ -39,7 +39,7 @@ export interface AiUsage {
 
 export async function getAiUsageToday(account: Account): Promise<AiUsage> {
   const accountId = account.account_id;
-  if (!accountId) return { totalNeurons: 0, models: [] };
+  if (!accountId) throw new Error(`AI usage: account "${account.name}" missing account_id`);
 
   const now = new Date();
   const todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).toISOString();
@@ -86,17 +86,17 @@ export async function getAiUsageToday(account: Account): Promise<AiUsage> {
     resp = await proxyFetch(fetchUrl, { ...fetchInit, signal: controller.signal });
   } catch (e) {
     appLogger.error(`[AI Usage] Fetch failed for ${account.name}: ${e}\n[DEBUG curl] ${buildCurlCommand(fetchUrl, fetchInit)}`);
-    return { totalNeurons: 0, models: [] };
+    throw new Error(`AI usage fetch failed for ${account.name}: ${e}`);
   } finally {
     clearTimeout(timeout);
   }
 
-  if (!resp.ok) return { totalNeurons: 0, models: [] };
+  if (!resp.ok) throw new Error(`AI usage HTTP ${resp.status} for ${account.name}`);
 
   const json = await resp.json() as any;
   if (json.errors) {
     appLogger.error(`[GraphQL] AI usage errors: ${JSON.stringify(json.errors)}`);
-    return { totalNeurons: 0, models: [] };
+    throw new Error(`GraphQL errors for ${account.name}: ${JSON.stringify(json.errors)}`);
   }
 
   const acct = json?.data?.viewer?.accounts?.[0];

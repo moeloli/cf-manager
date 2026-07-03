@@ -24,6 +24,7 @@ export interface QuotaUsage {
   resource: string;
   date: string;
   count: number;
+  exhausted: number;
 }
 
 export interface AuditLogRow {
@@ -196,6 +197,28 @@ export async function getQuotaByAccount(db: D1Database, accountId: number, resou
   const today = new Date().toISOString().split('T')[0];
   return db.prepare('SELECT * FROM quota_usage WHERE account_id = ? AND resource = ? AND date = ?')
     .bind(accountId, resource, today).first<QuotaUsage>();
+}
+
+export async function setExhausted(db: D1Database, accountId: number, resource: string): Promise<void> {
+  const today = new Date().toISOString().split('T')[0];
+  await db.prepare(
+    `INSERT INTO quota_usage (account_id, resource, date, count, exhausted) VALUES (?, ?, ?, 0, 1)
+     ON CONFLICT(account_id, resource, date) DO UPDATE SET exhausted = 1`
+  ).bind(accountId, resource, today).run();
+}
+
+export async function clearExhausted(db: D1Database, accountId: number, resource: string): Promise<void> {
+  const today = new Date().toISOString().split('T')[0];
+  await db.prepare(
+    `UPDATE quota_usage SET exhausted = 0 WHERE account_id = ? AND resource = ? AND date = ?`
+  ).bind(accountId, resource, today).run();
+}
+
+export async function getQuotaTodayByResource(db: D1Database, resource: string): Promise<QuotaUsage[]> {
+  const today = new Date().toISOString().split('T')[0];
+  const { results } = await db.prepare('SELECT * FROM quota_usage WHERE resource = ? AND date = ?')
+    .bind(resource, today).all<QuotaUsage>();
+  return results;
 }
 
 // ============ Audit log ============

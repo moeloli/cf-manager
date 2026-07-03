@@ -17,6 +17,8 @@ export const accountsApi = {
     apiClient.post('/accounts/test-batch', data, { timeout: 600000 }),
   updateFeatures: (id: number, enabled_features: string) =>
     apiClient.patch(`/accounts/${id}/features`, { enabled_features }),
+  clearExhausted: (id: number) =>
+    apiClient.post(`/accounts/${id}/clear-exhausted`),
   importCsv: (file: File, skipVerify = false) => {
     const formData = new FormData();
     formData.append('file', file);

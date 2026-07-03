@@ -151,7 +151,7 @@ import { useMessage } from 'naive-ui';
 import { accountsApi } from '../api/accounts';
 
 interface AiUsageItem {
-  accountId: number;
+  accountId: string;
   accountName: string;
   totalNeurons: number;
   models: Array<{ modelId: string; neurons: number; requests: number }>;
@@ -186,12 +186,12 @@ function waitFrame(): Promise<void> {
 }
 
 const suggestions = [
-  '帮我写一首关于春天的诗',
-  '解释量子计算的基本原理',
-  '用Python写一个快速排序算法',
-  '推荐几部经典的科幻电影',
-  '如何学习机器学习？',
-  '什么是区块链技术？',
+  '今天天气怎么样？',
+  '帮我写一封请假邮件',
+  '推荐几部好看的电影',
+  '如何快速学习英语？',
+  '帮我制定一个健身计划',
+  '有什么好吃的家常菜推荐吗？',
 ];
 
 async function fetchAccounts() {
@@ -386,13 +386,21 @@ async function fetchUsage() {
     if (token) headers['Authorization'] = `Bearer ${token}`;
     
     const response = await fetch('/api/ai/usage', { headers });
+    
     if (!response.ok) throw new Error(`Failed to fetch usage: ${response.status}`);
     
     const result = await response.json();
+    
     // Handle both wrapped { success, data } and unwrapped array formats
     const data = result.data || result;
-    usageData.value = (data || []).map((d: any) => ({ ...d, expanded: false }));
-  } catch {
+    // Ensure totalNeurons always has a default value (0 if missing)
+    usageData.value = (data || []).map((d: any) => ({ 
+      ...d, 
+      totalNeurons: d.totalNeurons || 0,
+      expanded: false 
+    }));
+  } catch (error) {
+    console.error('[AiView] Failed to fetch usage:', error);
     usageData.value = [];
   }
 }

@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Env } from '../types';
-import { getAllAccounts, getAccountById, getAccountByEmail, nameFromEmail, createAccount, updateAccount, deleteAccount, addAuditLog, listAccountsPaged, AccountListFilter } from '../db/models';
+import { getAllAccounts, getAccountById, getAccountByEmail, nameFromEmail, createAccount, updateAccount, deleteAccount, addAuditLog, listAccountsPaged, AccountListFilter, clearExhausted } from '../db/models';
 import { encrypt } from '../services/encryption';
 import { cfFetch } from '../services/cfApi';
 import { getQuotaSummary } from '../services/quotaTracker';
@@ -157,6 +157,22 @@ app.post('/:id/test', async (c) => {
   return c.json({ user });
 });
 
+// ============ 清除 AI 配额耗尽标记 ============
+app.post('/:id/clear-exhausted', async (c) => {
+  const db = c.env.DB;
+  const id = parseInt(c.req.param('id'), 10);
+  if (isDemoAccount(id, c.env.DEMO_ACCOUNT_IDS)) {
+    return c.json({ error: { code: 'DEMO_PROTECTED', message: '演示账户不可操作' } }, 403);
+  }
+  const account = await getAccountById(db, id);
+  if (!account) {
+    return c.json({ error: { code: 'NOT_FOUND', message: 'Account not found' } }, 404);
+  }
+  await clearExhausted(db, id, 'ai_neurons');
+  try { await addAuditLog(db, { account_id: id, action: 'clear_exhausted', target: account.name, detail: 'ai_neurons', status: 'success' }); } catch {}
+  return c.json({ success: true, message: '已清除 AI 配额耗尽标记' });
+});
+
 // ============ 批量测试 ============
 // body: { ids?: number[], onlyUnverified?: boolean }
 // 不传 ids 且 onlyUnverified=true 时，测试所有 is_active=0 的账户
@@ -234,8 +250,8 @@ app.post('/import-csv', async (c) => {
   const encryptionKey = c.env.ENCRYPTION_KEY;
 
   const formData = await c.req.formData();
-  const file = formData.get('file');
-  if (!file || !(file instanceof File)) {
+  const file = formData.get('file') as Blob | null;
+  if (!file) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: '未提供 CSV 文件' } }, 400);
   }
 

@@ -1,4 +1,4 @@
-import { incrementQuota, getAllQuotaToday, getQuotaByAccount, setQuota } from '../models/quotaUsage';
+import { incrementQuota, getAllQuotaToday, getQuotaByAccount, setQuota, clearExhausted } from '../models/quotaUsage';
 import { getActiveAccounts, hasFeature, AccountFeature } from '../models/account';
 import { getAiUsageToday } from './aiService';
 import { getWorkersUsageToday } from './workerService';
@@ -29,7 +29,13 @@ export async function syncUsageFromCloudflare(): Promise<void> {
     if (hasFeature(account, 'ai')) {
       try {
         const aiUsage = await getAiUsageToday(account);
-        setQuota(account.id, 'ai_neurons', Math.round(aiUsage.totalNeurons));
+        // 只有当 CF 返回非零值才更新（避免覆盖本地估算数据）
+        if (aiUsage.totalNeurons > 0) {
+          setQuota(account.id, 'ai_neurons', Math.round(aiUsage.totalNeurons));
+          clearExhausted(account.id, 'ai_neurons');
+        } else {
+          appLogger.warn(`[Sync] AI usage returned 0 for ${account.name}, keeping local estimate`);
+        }
       } catch (e) {
         appLogger.error(`[Sync] AI usage failed for ${account.name}: ${e}`);
       }
@@ -38,7 +44,12 @@ export async function syncUsageFromCloudflare(): Promise<void> {
     if (hasFeature(account, 'workers')) {
       try {
         const workersUsage = await getWorkersUsageToday(account);
-        setQuota(account.id, 'workers_requests', workersUsage.requests);
+        // 只有当 CF 返回非零值才更新
+        if (workersUsage.requests > 0) {
+          setQuota(account.id, 'workers_requests', workersUsage.requests);
+        } else {
+          appLogger.warn(`[Sync] Workers usage returned 0 for ${account.name}, keeping local estimate`);
+        }
       } catch (e) {
         appLogger.error(`[Sync] Workers usage failed for ${account.name}: ${e}`);
       }
@@ -58,7 +69,8 @@ export function getQuotaSummary() {
         const row = usage.find(u => u.account_id === account.id && u.resource === resource);
         const count = row?.count || 0;
         const limit = LIMITS[resource];
-        return { resource, count, limit, remaining: Math.max(0, limit - count) };
+        const exhausted = row?.exhausted === 1;
+        return { resource, count, limit, remaining: Math.max(0, limit - count), exhausted };
       });
     return { accountId: account.id, accountName: account.name, resources };
   });

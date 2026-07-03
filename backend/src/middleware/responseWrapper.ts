@@ -8,6 +8,11 @@ export function responseWrapper(_req: Request, res: Response, next: NextFunction
   const originalJson = res.json.bind(res);
 
   res.json = function (body: any) {
+    // Skip wrapping for all OpenAI-compatible paths (/api/v1/*), keep original format.
+    // This ensures error responses ({ error: { ... } }) are not wrapped into { success: false, error: ... }.
+    if (_req.path.startsWith('/api/v1')) {
+      return originalJson(body);
+    }
     // Skip wrapping for OpenAI format responses (returned by /api/v1/* routes)
     if (body && typeof body === 'object' && (body.object === 'list' || body.object === 'chat.completion' || body.id?.startsWith('chatcmpl-'))) {
       return originalJson(body);

@@ -1,13 +1,24 @@
-import { getActiveAccounts, hasFeature, getAllQuotaToday, setQuota, incrementQuota, getQuotaByAccount, type Account, type AccountFeature } from '../db/models';
+import { getActiveAccounts, getActiveAccountsByFeature, hasFeature, getAllQuotaToday, setQuota, incrementQuota, getQuotaByAccount, getQuotaTodayByResource, getAccountById, clearExhausted, setExhausted, type Account, type AccountFeature } from '../db/models';
+import type { Env } from '../types';
 import { cfGraphQL } from './cfApi';
 
 export type ResourceType = 'workers_requests' | 'ai_neurons' | 'browser_render_seconds';
 
-const LIMITS: Record<string, number> = {
+export const LIMITS: Record<string, number> = {
   workers_requests: 100000,
   ai_neurons: 10000,
   browser_render_seconds: 600,
 };
+
+const KV_KEY = 'ai_neuron_snapshot';
+const KV_TTL = 60; // seconds
+
+interface AiKvEntry {
+  id: number;
+  account_id: string;
+  name: string;
+  used: number;
+}
 
 const RESOURCE_FEATURE: Record<ResourceType, AccountFeature> = {
   workers_requests: 'workers',
@@ -27,6 +38,7 @@ export async function syncUsageFromCloudflare(db: D1Database, encryptionKey: str
       try {
         const usage = await getAiUsageToday(account, encryptionKey);
         await setQuota(db, account.id, 'ai_neurons', Math.round(usage.totalNeurons));
+        await clearExhausted(db, account.id, 'ai_neurons');
       } catch (e) {
         console.error(`[Sync] AI usage failed for ${account.name}: ${e}`);
       }
@@ -54,7 +66,8 @@ export async function getQuotaSummary(db: D1Database, encryptionKey: string) {
         const row = usage.find(u => u.account_id === account.id && u.resource === resource);
         const count = row?.count || 0;
         const limit = LIMITS[resource];
-        return { resource, count, limit, remaining: Math.max(0, limit - count) };
+        const exhausted = row?.exhausted === 1;
+        return { resource, count, limit, remaining: Math.max(0, limit - count), exhausted };
       });
     return { accountId: account.id, accountName: account.name, resources };
   });
@@ -67,28 +80,65 @@ export async function getAccountQuota(db: D1Database, accountId: number, resourc
   return { used, remaining: Math.max(0, limit - used) };
 }
 
-export async function selectBestAccount(db: D1Database, encryptionKey: string, resource: ResourceType): Promise<Account | null> {
-  const featureMap: Record<ResourceType, AccountFeature> = { workers_requests: 'workers', ai_neurons: 'ai', browser_render_seconds: 'browser_render' };
-  const accounts = (await getActiveAccounts(db)).filter(a => hasFeature(a, featureMap[resource]));
-  if (accounts.length === 0) return null;
-
-  if (resource === 'ai_neurons') {
-    const results = await Promise.all(accounts.map(async (account) => {
-      try {
-        const usage = await getAiUsageToday(account, encryptionKey);
-        return { account, remaining: LIMITS.ai_neurons - usage.totalNeurons };
-      } catch {
-        return { account, remaining: 0 };
-      }
-    }));
-    results.sort((a, b) => b.remaining - a.remaining);
-    return results[0]?.account || null;
+async function getAiSnapshot(env: Env): Promise<Array<AiKvEntry & { _account?: Account }>> {
+  if (env.KV) {
+    const cached = await env.KV.get<AiKvEntry[]>(KV_KEY, 'json');
+    if (cached) return cached as Array<AiKvEntry & { _account?: Account }>;
   }
+  const accounts = await getActiveAccountsByFeature(env.DB, 'ai');
+  const usageRows = await getQuotaTodayByResource(env.DB, 'ai_neurons');
+  const usageMap = new Map(usageRows.map(r => [r.account_id, r]));
+  const ranked = accounts
+    .map(account => ({
+      id: account.id,
+      account_id: account.account_id || '',
+      name: account.name,
+      used: usageMap.get(account.id)?.count || 0,
+      _exhausted: usageMap.get(account.id)?.exhausted === 1,
+      _account: account,
+    }))
+    .filter(r => !r._exhausted)
+    .sort((a, b) => a.used - b.used);
+
+  if (env.KV) {
+    const kvData = ranked.map(r => ({ id: r.id, account_id: r.account_id, name: r.name, used: r.used }));
+    await env.KV.put(KV_KEY, JSON.stringify(kvData), { expirationTtl: KV_TTL });
+  }
+  return ranked;
+}
+
+export async function invalidateAiCache(env: Env): Promise<void> {
+  if (env.KV) await env.KV.delete(KV_KEY);
+}
+
+export async function selectBestAccount(
+  env: Env,
+  resource: ResourceType,
+  excludeIds?: Set<number>
+): Promise<Account | null> {
+  if (resource === 'ai_neurons') {
+    if (env.KV) {
+      const cached = await env.KV.get<AiKvEntry[]>(KV_KEY, 'json');
+      if (cached) {
+        const best = cached.find(r => !excludeIds?.has(r.id));
+        if (!best) return null;
+        return await getAccountById(env.DB, best.id);
+      }
+    }
+    const snapshot = await getAiSnapshot(env);
+    const best = snapshot.find(r => !excludeIds?.has(r.id));
+    return best?._account || null;
+  }
+
+  // Non-ai_neurons branch keeps original logic
+  const featureMap: Record<ResourceType, AccountFeature> = { workers_requests: 'workers', ai_neurons: 'ai', browser_render_seconds: 'browser_render' };
+  const accounts = (await getActiveAccounts(env.DB)).filter(a => hasFeature(a, featureMap[resource]));
+  if (accounts.length === 0) return null;
 
   let best: Account | null = null;
   let bestRemaining = -1;
   for (const account of accounts) {
-    const { remaining } = await getAccountQuota(db, account.id, resource);
+    const { remaining } = await getAccountQuota(env.DB, account.id, resource);
     if (remaining > bestRemaining) { bestRemaining = remaining; best = account; }
   }
   return best;
@@ -97,7 +147,7 @@ export async function selectBestAccount(db: D1Database, encryptionKey: string, r
 interface AiUsage { totalNeurons: number; models: { modelId: string; neurons: number; requests: number }[] }
 
 async function getAiUsageToday(account: Account, encryptionKey: string): Promise<AiUsage> {
-  if (!account.account_id) return { totalNeurons: 0, models: [] };
+  if (!account.account_id) throw new Error(`AI usage: account "${account.name}" missing account_id`);
   const now = new Date();
   const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).toISOString();
   const end = now.toISOString();
@@ -114,7 +164,7 @@ async function getAiUsageToday(account: Account, encryptionKey: string): Promise
     return { totalNeurons: Math.round(totalNeurons), models };
   } catch (e) {
     console.error(`[AI Usage] Failed for ${account.name}: ${e}`);
-    return { totalNeurons: 0, models: [] };
+    throw new Error(`AI usage failed for ${account.name}: ${e}`);
   }
 }
 
@@ -144,4 +194,4 @@ async function getWorkersUsageToday(account: Account, encryptionKey: string): Pr
   }
 }
 
-export { getAiUsageToday, getWorkersUsageToday };
+export { getWorkersUsageToday };
