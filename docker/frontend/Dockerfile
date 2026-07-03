@@ -3,7 +3,9 @@ FROM node:24-alpine AS builder
 WORKDIR /app
 COPY frontend/package*.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci
-COPY frontend/ .
+COPY frontend/tsconfig*.json frontend/vite.config.ts frontend/index.html ./
+COPY frontend/public ./public
+COPY frontend/src ./src
 RUN npm run build
 
 # ---- Production Stage ----
