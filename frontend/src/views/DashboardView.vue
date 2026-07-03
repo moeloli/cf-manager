@@ -45,6 +45,7 @@ import { ref, computed, onMounted } from 'vue';
 import { useQuotaStore } from '../stores/quotaStore';
 import apiClient from '../api/client';
 import type { DataTableColumns } from 'naive-ui';
+import { formatCN } from '../utils/dateFormat';
 
 const quotaStore = useQuotaStore();
 const quotaWithResources = computed(() =>
@@ -84,7 +85,7 @@ function calcPercentage(r: any) {
 }
 
 const logColumns: DataTableColumns<any> = [
-  { title: '时间', key: 'created_at', width: 180, render: (row) => new Date(row.created_at).toLocaleString() },
+  { title: '时间', key: 'created_at', width: 180, render: (row) => formatCN(row.created_at) },
   { title: '账号', key: 'account_name', width: 120, render: (row) => row.account_name || '-' },
   { title: '操作', key: 'action', width: 150 },
   { title: '目标', key: 'target', width: 150 },

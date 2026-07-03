@@ -245,7 +245,7 @@
                     <n-descriptions-item label="生产分支">{{ pagesProject.production_branch }}</n-descriptions-item>
                     <n-descriptions-item label="框架">{{ pagesProject.framework || '-' }}</n-descriptions-item>
                     <n-descriptions-item label="子域名">{{ pagesProject.subdomain || '-' }}</n-descriptions-item>
-                    <n-descriptions-item label="创建时间">{{ pagesProject.created_on ? new Date(pagesProject.created_on).toLocaleString() : '-' }}</n-descriptions-item>
+                    <n-descriptions-item label="创建时间">{{ pagesProject.created_on ? formatCN(pagesProject.created_on) : '-' }}</n-descriptions-item>
                     <n-descriptions-item label="Functions">{{ pagesProject.uses_functions ? '是' : '否' }}</n-descriptions-item>
                   </n-descriptions>
                 </n-card>
@@ -517,6 +517,7 @@ import type { DataTableColumns } from 'naive-ui';
 import { useWorkerStore } from '../stores/workerStore';
 import { useAccountStore } from '../stores/accountStore';
 import { workersApi } from '../api/workers';
+import { formatCN } from '../utils/dateFormat';
 
 const workerStore = useWorkerStore();
 const accountStore = useAccountStore();
@@ -1221,7 +1222,7 @@ const columns = computed<DataTableColumns<any>>(() => {
     { title: '状态', key: 'status', width: 100, render: (row) => h(NTag, { size: 'small', type: row.status === 'enabled' ? 'success' : 'default' }, { default: () => row.status || (row.type === 'pages' ? 'active' : 'unknown') }) },
   ];
   if (hasModifiedOn) {
-    cols.push({ title: '修改时间', key: 'modified_on', width: 180, render: (row) => row.modified_on ? new Date(row.modified_on).toLocaleString() : '-' });
+    cols.push({ title: '修改时间', key: 'modified_on', width: 180, render: (row) => row.modified_on ? formatCN(row.modified_on) : '-' });
   }
   cols.push({
     title: '操作', key: 'actions', width: 280,
@@ -1254,7 +1255,7 @@ const secretColumns: DataTableColumns<any> = [
 // Schedule columns
 const scheduleColumns: DataTableColumns<any> = [
   { title: 'Cron 表达式', key: 'cron' },
-  { title: '修改时间', key: 'modified_on', render: (row) => row.modified_on ? new Date(row.modified_on).toLocaleString() : '-' },
+  { title: '修改时间', key: 'modified_on', render: (row) => row.modified_on ? formatCN(row.modified_on) : '-' },
 ];
 
 // Domain columns
@@ -1275,7 +1276,7 @@ const routeColumns: DataTableColumns<any> = [
 // Deployment columns
 const deploymentColumns: DataTableColumns<any> = [
   { title: 'ID', key: 'id', width: 120, ellipsis: true },
-  { title: '创建时间', key: 'created_on', render: (row) => row.created_on ? new Date(row.created_on).toLocaleString() : '-' },
+  { title: '创建时间', key: 'created_on', render: (row) => row.created_on ? formatCN(row.created_on) : '-' },
   { title: '来源', key: 'source', width: 100, render: (row) => row.source || '-' },
 ];
 
@@ -1327,7 +1328,7 @@ const pagesDeploymentColumns: DataTableColumns<any> = [
   { title: '状态', key: 'status', width: 100, render: (row) => h(NTag, { size: 'small', type: row.latest_stage?.status === 'success' ? 'success' : row.latest_stage?.status === 'failure' ? 'error' : 'default' }, { default: () => row.latest_stage?.status || '-' }) },
   { title: '阶段', key: 'stage', width: 100, render: (row) => row.latest_stage?.name || '-' },
   { title: 'URL', key: 'url', minWidth: 250, render: (row) => row.url ? h('a', { href: row.url, target: '_blank', style: 'word-break: break-all; font-size: 12px;' }, row.url) : '-' },
-  { title: '创建时间', key: 'created_on', width: 170, render: (row) => row.created_on ? new Date(row.created_on).toLocaleString() : '-' },
+  { title: '创建时间', key: 'created_on', width: 170, render: (row) => row.created_on ? formatCN(row.created_on) : '-' },
 ];
 
 // ============ Batch Deploy ============

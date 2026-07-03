@@ -275,6 +275,7 @@ import { NButton, NSpace, NInput, NSelect, NCheckbox, useMessage, useDialog } fr
 import type { DataTableColumns } from 'naive-ui';
 import { storageApi } from '../api/storage';
 import { useAccountStore } from '../stores/accountStore';
+import { formatCN } from '../utils/dateFormat';
 
 const accountStore = useAccountStore();
 const message = useMessage();
@@ -458,7 +459,7 @@ async function handleDeleteKv(row: any) {
 
 const kvColumns: DataTableColumns<any> = [
   { title: 'Key', key: 'name', ellipsis: { tooltip: true } },
-  { title: '过期时间', key: 'expiration', width: 180, render: (row) => row.expiration ? new Date(row.expiration * 1000).toLocaleString() : '永不' },
+  { title: '过期时间', key: 'expiration', width: 180, render: (row) => row.expiration ? formatCN(row.expiration * 1000) : '永不' },
   {
     title: '操作', key: 'actions', width: 140,
     render: (row) => h(NSpace, null, { default: () => [
@@ -886,7 +887,7 @@ const r2Columns: DataTableColumns<any> = [
   },
   { title: '类型', key: 'contentType', width: 120, ellipsis: { tooltip: true }, render: (row: any) => row.contentType || '-' },
   { title: '大小', key: 'size', width: 100, render: (row: any) => row.isFolder ? '-' : formatSize(row.size) },
-  { title: '修改时间', key: 'lastModified', width: 180, render: (row: any) => row.lastModified ? new Date(row.lastModified).toLocaleString() : '-' },
+  { title: '修改时间', key: 'lastModified', width: 180, render: (row: any) => row.lastModified ? formatCN(row.lastModified) : '-' },
   {
     title: '操作', key: 'actions', width: 180,
     render: (row: any) => {

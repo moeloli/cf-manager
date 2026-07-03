@@ -120,7 +120,7 @@
       <n-drawer-content :title="`执行历史 - ${historyTaskName}`" closable>
         <n-spin :show="historyLoading">
           <n-timeline>
-            <n-timeline-item v-for="h in taskHistory" :key="h.id" :type="h.status === 'success' ? 'success' : h.status === 'error' ? 'error' : 'info'" :title="h.status" :content="h.detail || '-'" :time="h.started_at ? new Date(h.started_at).toLocaleString() : '-'" />
+            <n-timeline-item v-for="h in taskHistory" :key="h.id" :type="h.status === 'success' ? 'success' : h.status === 'error' ? 'error' : 'info'" :title="h.status" :content="h.detail || '-'" :time="h.started_at ? formatCN(h.started_at) : '-'" />
           </n-timeline>
           <n-empty v-if="!taskHistory.length && !historyLoading" description="暂无执行记录" />
         </n-spin>
@@ -137,6 +137,7 @@ import { settingsApi } from '../api/settings';
 import { tasksApi } from '../api/storage';
 import apiClient from '../api/client';
 import { useAccountStore } from '../stores/accountStore';
+import { formatCN } from '../utils/dateFormat';
 
 const message = useMessage();
 
