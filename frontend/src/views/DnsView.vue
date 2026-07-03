@@ -32,6 +32,7 @@
             :loading="dnsStore.loading"
             size="small"
             :bordered="false"
+            :scroll-x="680"
           />
         </n-card>
       </n-gi>
