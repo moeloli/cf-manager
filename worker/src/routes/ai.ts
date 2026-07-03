@@ -69,10 +69,40 @@ app.post('/inference', async (c) => {
         const reader = resp.body?.getReader();
         if (!reader) { await s.write('data: [DONE]\n\n'); return; }
         const decoder = new TextDecoder();
+        let sseBuffer = '';
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-          await s.write(decoder.decode(value, { stream: true }));
+          sseBuffer += decoder.decode(value, { stream: true });
+          const lines = sseBuffer.split('\n');
+          sseBuffer = lines.pop() || '';
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const payload = line.slice(6).trim();
+            if (payload === '[DONE]') { await s.write('data: [DONE]\n\n'); continue; }
+            try {
+              const obj = JSON.parse(payload);
+              const delta = obj.choices?.[0]?.delta;
+              if (delta?.reasoning_content) {
+                await s.write(`data: ${JSON.stringify({ type: 'reasoning', chunk: delta.reasoning_content })}\n\n`);
+              } else if (delta?.content) {
+                await s.write(`data: ${JSON.stringify({ type: 'content', chunk: delta.content })}\n\n`);
+              } else if (obj.response) {
+                await s.write(`data: ${JSON.stringify({ type: 'content', chunk: obj.response })}\n\n`);
+              }
+            } catch { /* skip unparseable lines */ }
+          }
+        }
+        if (sseBuffer.trim()) {
+          const line = sseBuffer.trim();
+          if (line.startsWith('data: ') && line.slice(6).trim() !== '[DONE]') {
+            try {
+              const obj = JSON.parse(line.slice(6));
+              const delta = obj.choices?.[0]?.delta;
+              if (delta?.content) await s.write(`data: ${JSON.stringify({ type: 'content', chunk: delta.content })}\n\n`);
+              else if (obj.response) await s.write(`data: ${JSON.stringify({ type: 'content', chunk: obj.response })}\n\n`);
+            } catch {}
+          }
         }
         return;
       } catch (err: any) {
