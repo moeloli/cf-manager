@@ -17,7 +17,7 @@ CF Manager 支持两种部署方式：**Docker 部署**（自建服务器）和 
 
 ```bash
 # 1. 克隆项目
-git clone <your-repo-url>
+git clone https://github.com/hefy2027/cf-manager.git
 cd cf-manager
 
 # 2. 创建配置文件
@@ -143,7 +143,17 @@ npm run dev
 4. 进入数据库详情页 → **Console** 标签
 5. 将 `worker/src/db/schema.sql` 文件内容粘贴到控制台中执行
 
-#### 2. 一键构建部署包
+#### 2. 获取部署包
+
+**方式一：直接下载（推荐）**
+
+从 GitHub Releases 下载最新预构建包，无需本地构建：
+
+👉 [下载最新版 cf-manager.zip](https://github.com/hefy2027/cf-manager/releases/latest/download/cf-manager.zip)
+
+或访问 [Releases 页面](https://github.com/hefy2027/cf-manager/releases) 选择特定版本。
+
+**方式二：本地构建**
 
 ```bash
 cd worker
@@ -184,8 +194,8 @@ npm run build
 
 #### 更新
 
-1. `cd worker && npm run build` 重新构建
-2. Dashboard → Pages → cf-manager → **Create deployment** → 上传新的 `worker/cf-manager.zip`
+1. 从 [Releases](https://github.com/hefy2027/cf-manager/releases/latest/download/cf-manager.zip) 下载最新版，或本地 `cd worker && npm run build` 重新构建
+2. Dashboard → Pages → cf-manager → **Create deployment** → 上传新的 `cf-manager.zip`
 
 ---
 

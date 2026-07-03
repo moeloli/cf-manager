@@ -85,6 +85,12 @@
 
 ### Cloudflare Pages 部署（零成本）
 
+**直接下载预构建包（推荐）：**
+
+👉 [下载最新版 cf-manager.zip](https://github.com/hefy2027/cf-manager/releases/latest/download/cf-manager.zip)
+
+**或本地构建：**
+
 ```bash
 cd worker
 npm install
@@ -97,7 +103,7 @@ npm run build    # 构建 → worker/cf-manager.zip
 
 ```bash
 # 1. 克隆项目
-git clone <your-repo-url>
+git clone https://github.com/hefy2027/cf-manager.git
 cd cf-manager
 
 # 2. 创建配置文件
