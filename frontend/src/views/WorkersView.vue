@@ -737,6 +737,11 @@ async function openBindingModal() {
 
 async function onBindingTypeChange(type: string) {
   bindingForm.value.value = '';
+  if (type === 'r2_buckets' && !r2Available.value) {
+    message.warning('当前账户未启用 R2，请先在 Cloudflare 控制台启用');
+    bindingForm.value.type = 'kv_namespaces';
+    return;
+  }
   await loadBindingResources(type);
 }
 
@@ -748,14 +753,17 @@ async function loadBindingResources(type: string) {
     if (type === 'kv_namespaces') resp = await workersApi.getKvNamespaces(settingsAccountId.value);
     else if (type === 'd1_databases') resp = await workersApi.getD1Databases(settingsAccountId.value);
     else if (type === 'r2_buckets') {
-      if (!r2Available.value) {
-        message.warning('当前账户未启用 R2，请先在 Cloudflare 控制台启用');
-        return;
-      }
       resp = await workersApi.getR2Buckets(settingsAccountId.value);
     }
     bindingResources.value = Array.isArray(resp?.data) ? resp.data : [];
-  } catch { bindingResources.value = []; }
+  } catch (err: any) {
+    const msg = err?.response?.data?.error?.message || err?.message || '';
+    if (type === 'r2_buckets' && (msg.includes('10042') || msg.includes('Please enable R2'))) {
+      message.warning('当前账户未启用 R2，请先在 Cloudflare 控制台启用');
+      r2Available.value = false;
+    }
+    bindingResources.value = [];
+  }
   finally { bindingResourcesLoading.value = false; }
 }
 
@@ -888,7 +896,6 @@ async function openSettings(row: any) {
     loadPagesDomains();
     loadPagesDeployments();
     loadBindings();
-    checkR2Available();
   }
 }
 
@@ -1203,7 +1210,15 @@ const deploymentColumns: DataTableColumns<any> = [
 const pagesDomainColumns: DataTableColumns<any> = [
   { title: '域名', key: 'name' },
   { title: '状态', key: 'status', width: 100, render: (row) => h(NTag, { size: 'small', type: row.status === 'active' ? 'success' : 'warning' }, { default: () => row.status || '-' }) },
-  { title: '操作', key: 'actions', width: 80, render: (row) => h(NButton, { size: 'tiny', type: 'error', onClick: () => handleRemovePagesDomain(row) }, { default: () => '删除' }) },
+  {
+    title: '操作', key: 'actions', width: 120,
+    render: (row) => h(NSpace, null, {
+      default: () => [
+        h(NButton, { size: 'tiny', type: 'info', onClick: () => window.open(`https://${row.name}`, '_blank') }, { default: () => '打开' }),
+        h(NButton, { size: 'tiny', type: 'error', onClick: () => handleRemovePagesDomain(row) }, { default: () => '删除' }),
+      ]
+    })
+  },
 ];
 
 // Pages env var columns
