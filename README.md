@@ -42,6 +42,8 @@
 
 ### AI 推理
 - 支持所有 Cloudflare Workers AI 模型
+- **Prompt Caching 感知计费**：自动识别 GLM-5.2 / Kimi K2.5 / K2.6 / K2.7-code 的缓存命中 token，按 CF 折扣价精准估算神经元用量
+- **缓存感知路由**：缓存模型优先复用最近使用的账户，最大化缓存命中率，大幅降低神经元消耗
 - 流式对话界面，Reasoning 模型思考过程实时展示
 - 历史对话上下文支持
 - 多账户自动轮换，配额耗尽无缝切换
@@ -54,7 +56,8 @@
 ### OpenAI 兼容 API
 - 暴露 `/v1/chat/completions` 和 `/v1/models` 接口
 - 完全兼容 OpenAI SDK，可直接对接 Cursor、ChatGPT-Next-Web、Open WebUI 等工具
-- 支持流式和非流式响应
+- 支持流式和非流式响应，自动注入 `stream_options.include_usage` 确保用量可追踪
+- Prompt Caching 自动检测与折扣计费
 - 浏览器渲染 API (`/v1/browser/render`)
 - 详见 [API 文档](docs/api-v1.md)
 
@@ -123,6 +126,8 @@ Workers & Pages → Create → Pages → Upload assets → 上传 `cf-manager.zi
 
 Settings → Bindings → Add D1 Database → Variable name: `DB` → 选择你的数据库
 
+Settings → Bindings → Add KV Namespace → Variable name: `KV` → 创建或选择已有的命名空间
+
 Settings → Environment variables → 添加 `ENCRYPTION_KEY` 和 `API_SECRET`（可选）
 
 **5. 重新部署后访问** `https://your-project.pages.dev/admin/`
@@ -163,6 +168,7 @@ chmod +x deploy.sh
 | `APP_PORT` | 否 | 对外暴露端口，默认 `3000` |
 | `BASE_URL` | 否 | 前端访问路径，如 `/admin/`，默认 `/`（仅 Docker 部署需要，Worker 版固定为 `/admin/`） |
 | `DEMO_ACCOUNT_IDS` | 否 | 演示模式保护的账户 ID（逗号分隔），如 `1,2,3`。受保护账户不可删除和修改 |
+| `KV` (Binding) | 否 | KV Namespace 绑定（仅 Pages 部署），用于并发请求保护和缓存感知路由。可选但推荐 |
 
 <details>
 <summary><strong>本地开发</strong></summary>
@@ -223,11 +229,15 @@ cf-manager/
 │       ├── Dockerfile
 │       ├── nginx.conf.template  # Nginx 配置模板（支持 BASE_URL）
 │       └── entrypoint.sh        # 容器启动脚本
+├── shared/                  # 前后端共享配置
+│   └── model-pricing.json    # AI 模型定价（含缓存价格）
 ├── docs/                    # 文档
 │   ├── api-v1.md            # 外部 API 接口文档
-│   └── account-auth.md      # 账户认证方式说明
+│   ├── account-auth.md      # 账户认证方式说明
+│   └── deploy.md            # 部署文档
 ├── docker-compose.yml
 ├── deploy.sh                # 一键部署脚本
+├── CHANGELOG.md             # 更新日志
 └── .env.example             # 环境变量模板
 ```
 
@@ -260,6 +270,10 @@ cf-manager/
 ![设置](images/settings.png)
 
 ---
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=hefy2027/cf-manager&type=Date)](https://star-history.com/#hefy2027/cf-manager&Date)
 
 ## License
 

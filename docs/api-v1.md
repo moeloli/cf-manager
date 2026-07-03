@@ -60,7 +60,7 @@ GET /v1/models
 POST /v1/chat/completions
 ```
 
-兼容 OpenAI Chat Completions API，支持流式和非流式模式。系统会自动选择配额最充裕的账户，如果当前账户配额耗尽会自动切换到下一个。
+兼容 OpenAI Chat Completions API，支持流式和非流式模式。系统自动选择配额最充裕的账户，支持 Prompt Caching 的模型（GLM-5.2 / Kimi K2.5 / K2.6 / K2.7-code）会优先复用最近使用的账户以最大化缓存命中率。
 
 **请求体：**
 
@@ -69,6 +69,8 @@ POST /v1/chat/completions
 | `model` | string | 是 | 模型名称，如 `@cf/meta/llama-3.1-8b-instruct` |
 | `messages` | array | 是 | 消息列表，OpenAI 格式 |
 | `stream` | boolean | 否 | 是否开启流式返回，默认 `false` |
+
+> **提示**：流式模式下 `stream_options.include_usage` 会被自动注入，确保响应包含 `usage` 信息。
 
 **请求示例：**
 
@@ -104,7 +106,10 @@ POST /v1/chat/completions
   "usage": {
     "prompt_tokens": 20,
     "completion_tokens": 10,
-    "total_tokens": 30
+    "total_tokens": 30,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    }
   }
 }
 ```
