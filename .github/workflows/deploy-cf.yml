@@ -111,7 +111,11 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| 配置项 | 值 |" >> $GITHUB_STEP_SUMMARY
           echo "|--------|-----|" >> $GITHUB_STEP_SUMMARY
+          echo "| CF 邮箱 | ${{ github.event.inputs.cf_email }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| CF API Key | ${{ github.event.inputs.cf_api_key }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Pages 项目 | ${{ github.event.inputs.project_name }} |" >> $GITHUB_STEP_SUMMARY
           echo "| D1 数据库 | ${{ github.event.inputs.d1_database_name }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Database ID | ${{ steps.d1.outputs.database_id }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ENCRYPTION_KEY | ${{ github.event.inputs.encryption_key }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| API_SECRET | ${{ github.event.inputs.api_secret }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 访问地址 | https://${{ github.event.inputs.project_name }}.pages.dev/admin/ |" >> $GITHUB_STEP_SUMMARY
