@@ -15,7 +15,7 @@ export function responseWrapper(_req: Request, res: Response, next: NextFunction
       return originalJson(body);
     }
     // Skip wrapping for OpenAI format responses (returned by /api/v1/* routes)
-    if (body && typeof body === 'object' && (body.object === 'list' || body.object === 'chat.completion' || body.id?.startsWith('chatcmpl-'))) {
+    if (body && typeof body === 'object' && (body.object === 'list' || body.object === 'chat.completion' || (typeof body.id === 'string' && body.id.startsWith('chatcmpl-')))) {
       return originalJson(body);
     }
     
