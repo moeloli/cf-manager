@@ -113,11 +113,18 @@ jobs:
         run: |
           KV_NAME="${{ github.event.inputs.kv_namespace_name }}"
 
+          # 尝试获取 account ID（可选，部分操作需要）
+          ACCOUNT_ID=$(wrangler whoami 2>/dev/null | grep -oE '"account_id"\s*:\s*"[^"]*"' | grep -oE '[0-9a-f]{32}' | head -1 || echo "")
+          ACCOUNT_FLAG=""
+          if [ -n "$ACCOUNT_ID" ]; then
+            ACCOUNT_FLAG="--account-id $ACCOUNT_ID"
+            echo "检测到 Account ID: $ACCOUNT_ID"
+          fi
+
           # --- 完全覆盖：清空 KV ---
           if [ "${{ github.event.inputs.full_wipe }}" = "true" ]; then
             echo "完全覆盖模式：清空 KV 命名空间..."
-            # 列出所有 namespace 并找到匹配的 ID（wrangler v3/v4 输出格式兼容）
-            KV_LIST=$(wrangler kv:namespace list 2>&1)
+            KV_LIST=$(wrangler kv:namespace list 2>&1 || true)
             echo "$KV_LIST" | head -20
             KV_OLD_ID=$(echo "$KV_LIST" | grep -i "$KV_NAME" | grep -oE '[0-9a-f]{32}' | head -1 || echo "")
             if [ -n "$KV_OLD_ID" ]; then
@@ -131,16 +138,17 @@ jobs:
           fi
 
           # 重新查找（可能已经被删除）
-          KV_LIST=$(wrangler kv:namespace list 2>&1)
+          KV_LIST=$(wrangler kv:namespace list 2>&1 || true)
           KV_ID=$(echo "$KV_LIST" | grep -i "$KV_NAME" | grep -oE '[0-9a-f]{32}' | head -1 || echo "")
 
           if [ -z "$KV_ID" ]; then
             echo "Creating KV namespace: $KV_NAME"
-            KV_OUTPUT=$(wrangler kv:namespace create "$KV_NAME" 2>&1)
+            KV_OUTPUT=$(wrangler kv:namespace create "$KV_NAME" $ACCOUNT_FLAG 2>&1 || true)
             echo "$KV_OUTPUT"
             KV_ID=$(echo "$KV_OUTPUT" | grep -oE '[0-9a-f]{32}' | head -1)
             if [ -z "$KV_ID" ]; then
-              echo "ERROR: 无法创建 KV namespace，请检查 API Key 权限或 namespace 配额"
+              echo "ERROR: 无法创建 KV namespace"
+              echo "请检查: 1) API Key 权限 2) KV namespace 配额 3) 账号下是否已有同名 namespace"
               exit 1
             fi
             echo "Created KV namespace with ID: $KV_ID"
