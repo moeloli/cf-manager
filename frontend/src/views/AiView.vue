@@ -146,8 +146,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue';
-import { useMessage, NProgress } from 'naive-ui';
+import { ref, reactive, onMounted, nextTick } from 'vue';
+import { useMessage } from 'naive-ui';
 import { aiApi } from '../api/ai';
 import { accountsApi } from '../api/accounts';
 
@@ -159,10 +159,6 @@ interface AiUsageItem {
   expanded?: boolean;
 }
 const usageData = ref<AiUsageItem[]>([]);
-const aiGridCols = computed(() => {
-  const count = usageData.value.length;
-  return `1 s:${Math.min(count, 2)} m:${Math.min(count, 3)} l:${Math.min(count, 5)}`;
-});
 
 interface ChatMessage {
   role: 'user' | 'assistant';

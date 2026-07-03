@@ -137,8 +137,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
-import { useMessage, NProgress } from 'naive-ui';
+import { ref, onMounted } from 'vue';
+import { useMessage } from 'naive-ui';
 import { browserRenderApi, type RenderMode } from '../api/browserRender';
 import { accountsApi } from '../api/accounts';
 
@@ -148,10 +148,6 @@ const selectedAccount = ref<string>('auto');
 const accountOptions = ref<{ label: string; value: string }[]>([]);
 interface UsageItem { accountId: number; accountName: string; used: number; limit: number; }
 const usageList = ref<UsageItem[]>([]);
-const brGridCols = computed(() => {
-  const count = usageList.value.length;
-  return `1 s:${Math.min(count, 2)} m:${Math.min(count, 3)} l:${Math.min(count, 5)}`;
-});
 const renderMode = ref<RenderMode>('screenshot');
 const rendering = ref(false);
 const htmlViewMode = ref<'render' | 'source'>('render');
