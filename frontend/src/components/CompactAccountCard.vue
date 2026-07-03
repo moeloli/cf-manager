@@ -113,11 +113,6 @@ const emptyDots = computed(() => Math.max(0, 3 - orderedResources.value.length))
 const hasResources = computed(() => props.resources && props.resources.length > 0);
 
 const hasExhausted = computed(() => props.resources && props.resources.some(r => r.exhausted));
-
-const displayName = computed(() => {
-  const name = props.accountName;
-  return name.length > 8 ? name.slice(0, 7) + '…' : name;
-});
 </script>
 
 <style scoped>
