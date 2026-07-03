@@ -516,7 +516,6 @@ import type { DataTableColumns } from 'naive-ui';
 import { useWorkerStore } from '../stores/workerStore';
 import { useAccountStore } from '../stores/accountStore';
 import { workersApi } from '../api/workers';
-import { dnsApi } from '../api/dns';
 
 const workerStore = useWorkerStore();
 const accountStore = useAccountStore();
