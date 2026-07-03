@@ -159,6 +159,7 @@ function parseFeatures(raw: string | undefined): string[] {
 const columns: DataTableColumns<any> = [
   { title: 'ID', key: 'id', width: 60 },
   { title: '名称', key: 'name', width: 150 },
+  { title: 'Account ID', key: 'account_id', width: 180, ellipsis: { tooltip: true }, render: (row) => row.account_id || '-' },
   { title: '认证类型', key: 'auth_type', width: 120, render: (row) => h(NTag, { size: 'small', type: row.auth_type === 'token' ? 'info' : 'warning' }, { default: () => row.auth_type === 'token' ? 'Token' : 'Key' }) },
   {
     title: '功能', key: 'enabled_features', width: 200,
