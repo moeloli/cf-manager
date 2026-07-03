@@ -81,25 +81,56 @@
 
 ## 快速开始
 
-> 两种部署方式可选，详见 [部署文档](docs/deploy.md)
+> 三种部署方式可选，详见 [部署文档](docs/deploy.md)
 
-### Cloudflare Pages 部署（零成本）
+<details open>
+<summary><strong>方式一：Fork 一键部署（最简单）</strong></summary>
 
-**直接下载预构建包（推荐）：**
+无需安装任何工具，全程在浏览器中完成。
+
+1. **Fork 本仓库** → 点击右上角 Fork
+2. 进入你 Fork 的仓库 → **Actions** → 选择 **Deploy to Cloudflare Pages**
+3. 点击 **Run workflow**，填入：
+   - `cf_api_key`：你的 Cloudflare Global API Key
+   - `cf_email`：你的 Cloudflare 账号邮箱
+   - 其他保持默认即可
+4. 等待部署完成，访问 `https://cfmgr.pages.dev/admin/`
+
+> Cloudflare Global API Key 获取：[Cloudflare Dashboard](https://dash.cloudflare.com/profile/api-tokens) → API Keys → Global API Key → View
+
+</details>
+
+<details>
+<summary><strong>方式二：Cloudflare Pages 手动部署（零成本）</strong></summary>
+
+下载预构建包上传到 Cloudflare Dashboard。
+
+**1. 下载部署包：**
 
 👉 [下载最新版 cf-manager.zip](https://github.com/hefy2027/cf-manager/releases/latest/download/cf-manager.zip)
 
-**或本地构建：**
+或本地构建：`cd worker && npm install && npm run build`
 
-```bash
-cd worker
-npm install
-npm run build    # 构建 → worker/cf-manager.zip
-```
+**2. 创建 D1 数据库：**
 
-将 `cf-manager.zip` 上传至 Cloudflare Pages Dashboard，配置 D1 绑定和环境变量即可。管理界面通过 `/admin/` 路径访问。
+Cloudflare Dashboard → Workers & Pages → D1 → Create → 名称填 `cf-manager` → 在 Console 中执行 `worker/src/db/schema.sql`
 
-### Docker 部署
+**3. 上传部署：**
+
+Workers & Pages → Create → Pages → Upload assets → 上传 `cf-manager.zip`
+
+**4. 配置 Bindings：**
+
+Settings → Bindings → Add D1 Database → Variable name: `DB` → 选择你的数据库
+
+Settings → Environment variables → 添加 `ENCRYPTION_KEY` 和 `API_SECRET`（可选）
+
+**5. 重新部署后访问** `https://your-project.pages.dev/admin/`
+
+</details>
+
+<details>
+<summary><strong>方式三：Docker 部署（自建服务器）</strong></summary>
 
 ```bash
 # 1. 克隆项目
@@ -120,6 +151,8 @@ chmod +x deploy.sh
 # 5. 访问 http://localhost:3000（或 http://localhost:3000/admin/ 如果设置了 BASE_URL）
 ```
 
+</details>
+
 ### 环境变量
 
 | 变量 | 必填 | 说明 |
@@ -130,7 +163,8 @@ chmod +x deploy.sh
 | `APP_PORT` | 否 | 对外暴露端口，默认 `3000` |
 | `BASE_URL` | 否 | 前端访问路径，如 `/admin/`，默认 `/`（仅 Docker 部署需要，Worker 版固定为 `/admin/`） |
 
-### 本地开发
+<details>
+<summary><strong>本地开发</strong></summary>
 
 ```bash
 # 后端（http://localhost:3001）
@@ -143,6 +177,8 @@ cd frontend
 npm install
 npm run dev
 ```
+
+</details>
 
 ---
 
