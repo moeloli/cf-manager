@@ -216,37 +216,6 @@ jobs:
             echo "${{ github.event.inputs.demo_account_ids }}" | wrangler pages secret put DEMO_ACCOUNT_IDS --project-name "${{ github.event.inputs.project_name }}"
           fi
 
-      - name: Bind KV to Pages project (via REST API)
-        run: |
-          PROJECT_NAME="${{ github.event.inputs.project_name }}"
-          KV_ID="${{ steps.kv.outputs.kv_namespace_id }}"
-          API_KEY="${{ github.event.inputs.cf_api_key }}"
-          API_EMAIL="${{ github.event.inputs.cf_email }}"
-
-          # 获取 Account ID
-          ACCOUNT_ID=$(wrangler whoami 2>/dev/null | grep -oE '[0-9a-f]{32}' | head -1 || echo "")
-          if [ -z "$ACCOUNT_ID" ]; then
-            echo "ERROR: 无法获取 Account ID"
-            exit 1
-          fi
-          echo "Account ID: $ACCOUNT_ID"
-
-          echo "绑定 KV namespace $KV_ID 到 Pages 项目 $PROJECT_NAME..."
-          curl -s -X PATCH \
-            "https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/pages/projects/${PROJECT_NAME}" \
-            -H "X-Auth-Email: ${API_EMAIL}" \
-            -H "X-Auth-Key: ${API_KEY}" \
-            -H "Content-Type: application/json" \
-            -d "{\"deployment_configs\":{\"production\":{\"kv_namespaces\":{\"KV\":{\"namespace_id\":\"${KV_ID}\"}}},\"preview\":{\"kv_namespaces\":{\"KV\":{\"namespace_id\":\"${KV_ID}\"}}}}}" \
-            | tee /tmp/kv_bind_result.json
-
-          if grep -q '"success":true' /tmp/kv_bind_result.json; then
-            echo "✅ KV 绑定成功"
-          else
-            echo "⚠️ KV 绑定可能失败，请检查返回结果"
-            cat /tmp/kv_bind_result.json
-          fi
-
       - name: Deploy to Cloudflare Pages
         working-directory: worker
         run: wrangler pages deploy public/ --project-name "${{ github.event.inputs.project_name }}" --branch main --commit-dirty=true
