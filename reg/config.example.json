@@ -2,7 +2,7 @@
   "randomPassword": true,
   "count": 1,
   "skipExisting": false,
-  "concurrency": 3,
+  "concurrency": 1,
   "headless": true,
   "screenshots": false,
   "timeout": {

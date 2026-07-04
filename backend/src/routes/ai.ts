@@ -2,7 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { Account } from '../models/account';
 import { getActiveAccounts } from '../models/account';
 import { getAiUsageToday } from '../services/aiService';
-import { setQuota, clearExhausted, getQuotaByAccount } from '../models/quotaUsage';
+import { setQuota, getQuotaByAccount } from '../models/quotaUsage';
 import { invalidateAiCache } from '../services/accountRouter';
 
 const router = Router();
@@ -12,7 +12,7 @@ const router = Router();
  * 获取所有活跃账户的 AI 使用量统计（同步路径，CF 权威校准）
  *
  * - 并发 getAiUsageToday(每个活跃账户)
- * - 成功的账户：setQuota(CF 权威值) + clearExhausted + invalidateAiCache
+ * - 成功的账户：setQuota(CF 权威值) + invalidateAiCache（不清除 exhausted 标记）
  * - 失败的账户：跳过（不更新，保留本地估算）
  */
 router.get('/usage', async (_req: Request, res: Response, next: NextFunction) => {
@@ -24,10 +24,12 @@ router.get('/usage', async (_req: Request, res: Response, next: NextFunction) =>
       try {
         const usage = await getAiUsageToday(account as Account);
         
-        // 当 CF 返回非零值：使用 CF 数据并更新本地
+        // 当 CF 返回非零值：使用 CF 数据更新本地计数
         if (usage.totalNeurons > 0) {
           setQuota(account.id, 'ai_neurons', usage.totalNeurons);
-          clearExhausted(account.id, 'ai_neurons');
+          // 不清除 exhausted 标记：exhausted 是 CF 返回 4006 时设置的，
+          // 表示当天免费额度已用完。使用量 > 0 只代表今天用了多少 neurons，
+          // 不代表额度没用完。标记只应通过日期变化或手动清除。
           return {
             accountId: account.account_id,
             accountName: account.name,

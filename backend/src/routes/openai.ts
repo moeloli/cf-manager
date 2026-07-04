@@ -47,6 +47,64 @@ function writeSseDone(res: Response): void {
   res.write('data: [DONE]\n\n');
 }
 
+/** Delay before first heartbeat (ms) — only send heartbeat if upstream TTFB exceeds this. */
+const HEARTBEAT_DELAY_MS = 15_000;
+
+/** SSE heartbeat interval (ms) — repeat interval after first heartbeat. */
+const HEARTBEAT_INTERVAL_MS = 10_000;
+
+/**
+ * Start DELAYED SSE heartbeat to prevent client TTFB timeout.
+ *
+ * Does NOT send anything immediately. Only starts sending `: heartbeat\n\n`
+ * comments after HEARTBEAT_DELAY_MS (15s) of silence, then every 10s.
+ *
+ * This avoids interfering with fast responses — most requests get a response
+ * from CF within a few seconds and never need a heartbeat. Only genuinely
+ * slow responses (30s+ TTFB) trigger the heartbeat.
+ *
+ * ONLY sends SSE comment (`: heartbeat\n\n`) — spec-compliant, all SSE
+ * parsers ignore comments, zero risk of corrupting the stream.
+ *
+ * Returns a stop function.
+ */
+function startSseHeartbeat(res: Response): () => void {
+  if (!res.headersSent) {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+  }
+
+  let intervalId: ReturnType<typeof setInterval> | null = null;
+
+  // Delay first heartbeat — most responses arrive before this.
+  const delayId = setTimeout(() => {
+    if (!res.writableEnded) {
+      res.write(': heartbeat\n\n');
+    }
+    intervalId = setInterval(() => {
+      if (!res.writableEnded) {
+        res.write(': heartbeat\n\n');
+      }
+    }, HEARTBEAT_INTERVAL_MS);
+  }, HEARTBEAT_DELAY_MS);
+
+  return () => {
+    clearTimeout(delayId);
+    if (intervalId) clearInterval(intervalId);
+  };
+}
+
+/** Send an error as an SSE event (for stream mode when headers already sent). */
+function sendSseError(res: Response, errorObj: Record<string, any>): void {
+  if (res.writableEnded) return;
+  res.write(`data: ${JSON.stringify({ error: errorObj })}\n\n`);
+  res.write('data: [DONE]\n\n');
+  res.end();
+}
+
 router.get('/models', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const account = await selectBestAccount('ai_neurons');
@@ -71,6 +129,8 @@ router.get('/models', async (req: Request, res: Response, next: NextFunction) =>
 });
 
 router.post('/chat/completions', async (req: Request, res: Response, next: NextFunction) => {
+  // Declare before try so catch block can access it for cleanup.
+  let stopHeartbeat: (() => void) | null = null;
   try {
     const specifiedAccountId = req.headers['x-account-id'] as string | undefined;
     const isStream = req.body.stream === true;
@@ -82,14 +142,24 @@ router.post('/chat/completions', async (req: Request, res: Response, next: NextF
 
     const rid = req.requestId || '-';
 
+    // For streaming: send SSE headers + heartbeat IMMEDIATELY to prevent
+    // client TTFB timeout. CF AI can take 30+ seconds before first byte;
+    // without this, clients like Cursor disconnect after ~30s of silence.
+    stopHeartbeat = isStream ? startSseHeartbeat(res) : null;
+
     // --- X-Account-ID specified: use that account directly, no rotation ---
     if (specifiedAccountId && specifiedAccountId !== 'auto') {
       const allAccounts = getActiveAccountsByFeature('ai');
       const account = allAccounts.find((a: any) => a.account_id === specifiedAccountId);
       if (!account) {
-        res.status(404).json({
-          error: { message: `Account ${specifiedAccountId} not found or inactive`, type: 'invalid_request_error', code: 'ACCOUNT_NOT_FOUND' },
-        });
+        if (stopHeartbeat) { stopHeartbeat(); stopHeartbeat = null; }
+        if (isStream) {
+          sendSseError(res, { message: `Account ${specifiedAccountId} not found or inactive`, type: 'invalid_request_error', code: 'ACCOUNT_NOT_FOUND' });
+        } else {
+          res.status(404).json({
+            error: { message: `Account ${specifiedAccountId} not found or inactive`, type: 'invalid_request_error', code: 'ACCOUNT_NOT_FOUND' },
+          });
+        }
         return;
       }
 
@@ -110,20 +180,31 @@ router.post('/chat/completions', async (req: Request, res: Response, next: NextF
             setExhausted(account.id, 'ai_neurons');
             removeAccountFromAiCache(account.id);
           }
-          res.status(cfResp.status).json({
-            error: { message: errorText, type: 'upstream_error', code: upstreamStatusToCode(cfResp.status) },
-          });
+          if (stopHeartbeat) { stopHeartbeat(); stopHeartbeat = null; }
+          if (isStream) {
+            sendSseError(res, { message: errorText, type: 'upstream_error', code: upstreamStatusToCode(cfResp.status) });
+          } else {
+            res.status(cfResp.status).json({
+              error: { message: errorText, type: 'upstream_error', code: upstreamStatusToCode(cfResp.status) },
+            });
+          }
           return;
         }
 
-        await processAccount(account, req, res, rid, isStream, cfResp);
+        await processAccount(account, req, res, rid, isStream, cfResp, stopHeartbeat);
+        stopHeartbeat = null;
       } catch (netErr: any) {
         const errMsg = `Network error: ${netErr.message || netErr}`;
         appLogger.error(`[AI][${rid}] Specified account ${account.name} ${errMsg}`);
         createAuditLog(account.id, 'ai_chat_completion', req.body.model, `[${rid}] ${errMsg}`, 'error');
-        res.status(502).json({
-          error: { message: errMsg, type: 'upstream_error', code: 'NETWORK_ERROR' },
-        });
+        if (stopHeartbeat) { stopHeartbeat(); stopHeartbeat = null; }
+        if (isStream) {
+          sendSseError(res, { message: errMsg, type: 'upstream_error', code: 'NETWORK_ERROR' });
+        } else {
+          res.status(502).json({
+            error: { message: errMsg, type: 'upstream_error', code: 'NETWORK_ERROR' },
+          });
+        }
       }
       return;
     }
@@ -195,28 +276,47 @@ router.post('/chat/completions', async (req: Request, res: Response, next: NextF
         }
 
         // Non-retryable (400, 401, 403, 404, etc.) — return immediately
-        res.status(cfResp.status).json({
-          error: { message: errorText, type: 'upstream_error', code: upstreamStatusToCode(cfResp.status) },
-        });
+        if (stopHeartbeat) { stopHeartbeat(); stopHeartbeat = null; }
+        if (isStream) {
+          sendSseError(res, { message: errorText, type: 'upstream_error', code: upstreamStatusToCode(cfResp.status) });
+        } else {
+          res.status(cfResp.status).json({
+            error: { message: errorText, type: 'upstream_error', code: upstreamStatusToCode(cfResp.status) },
+          });
+        }
         return;
       }
 
       // Success — process response (handles both stream and non-stream)
-      await processAccount(account, req, res, rid, isStream, cfResp);
+      await processAccount(account, req, res, rid, isStream, cfResp, stopHeartbeat);
+      stopHeartbeat = null;
       return;
     }
 
     // All accounts exhausted
     appLogger.error(`[AI][${rid}] All accounts exhausted. Last error: ${lastError}`);
-    res.status(429).json({
-      error: {
+    if (stopHeartbeat) { stopHeartbeat(); stopHeartbeat = null; }
+    if (isStream) {
+      sendSseError(res, {
         message: 'All accounts have reached daily neuron limit',
         type: 'quota_exceeded',
         code: 'ALL_ACCOUNTS_EXHAUSTED',
         last_error: lastError || 'Unknown error',
-      },
-    });
-  } catch (err) { next(err); }
+      });
+    } else {
+      res.status(429).json({
+        error: {
+          message: 'All accounts have reached daily neuron limit',
+          type: 'quota_exceeded',
+          code: 'ALL_ACCOUNTS_EXHAUSTED',
+          last_error: lastError || 'Unknown error',
+        },
+      });
+    }
+  } catch (err) {
+    if (stopHeartbeat) stopHeartbeat();
+    next(err);
+  }
 });
 
 /**
@@ -230,14 +330,17 @@ async function processAccount(
   rid: string,
   isStream: boolean,
   cfResp?: any,
+  stopHeartbeat?: (() => void) | null,
 ): Promise<void> {
   if (isStream) {
-    // SSE headers
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no');
-    res.flushHeaders();
+    // SSE headers (skip if already sent by heartbeat)
+    if (!res.headersSent) {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+      res.flushHeaders();
+    }
 
     let seenDone = false;
     let streamStatus: 'success' | 'client_disconnected' | 'upstream_error' = 'success';
@@ -348,6 +451,7 @@ async function processAccount(
       appLogger.error(`[AI][${rid}] Stream exception: ${err.message}`);
     } finally {
       req.off('close', onClose);
+      if (stopHeartbeat) stopHeartbeat();
       if (!seenDone && !res.writableEnded) {
         writeSseDone(res);
       }

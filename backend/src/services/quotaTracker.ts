@@ -1,4 +1,4 @@
-import { incrementQuota, getAllQuotaToday, getQuotaByAccount, setQuota, clearExhausted } from '../models/quotaUsage';
+import { incrementQuota, getAllQuotaToday, getQuotaByAccount, setQuota } from '../models/quotaUsage';
 import { getActiveAccounts, hasFeature, AccountFeature } from '../models/account';
 import { getAiUsageToday } from './aiService';
 import { getWorkersUsageToday } from './workerService';
@@ -32,7 +32,10 @@ export async function syncUsageFromCloudflare(): Promise<void> {
         // 只有当 CF 返回非零值才更新（避免覆盖本地估算数据）
         if (aiUsage.totalNeurons > 0) {
           setQuota(account.id, 'ai_neurons', Math.round(aiUsage.totalNeurons));
-          clearExhausted(account.id, 'ai_neurons');
+          // 不清除 exhausted 标记：exhausted 是 CF 返回 4006 时设置的，
+          // 表示当天免费额度已用完。即使 CF 使用量查询返回了 > 0 的值
+          // （今天用了多少 neurons），也不代表额度没用完。
+          // exhausted 标记只应通过日期变化（第二天自动消失）或手动清除。
         } else {
           appLogger.warn(`[Sync] AI usage returned 0 for ${account.name}, keeping local estimate`);
         }

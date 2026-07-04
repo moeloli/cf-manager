@@ -56,7 +56,9 @@ export async function syncUsageFromCloudflare(db: D1Database, encryptionKey: str
         if (usage.totalNeurons > 0) {
           // CF 返回非零 → 以 CF 数据为准
           await setQuota(db, account.id, 'ai_neurons', Math.round(usage.totalNeurons));
-          await clearExhausted(db, account.id, 'ai_neurons');
+          // 不清除 exhausted 标记：exhausted 是 CF 返回 4006 时设置的，
+          // 表示当天免费额度已用完。使用量 > 0 只代表今天用了多少 neurons，
+          // 不代表额度没用完。标记只应通过日期变化或手动清除。
         } else {
           // CF 返回 0 → 保留本地数据，不覆盖
           logger.info('sync', `${account.name}: CF returned 0 neurons, keeping local data`);

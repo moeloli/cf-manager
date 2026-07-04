@@ -407,10 +407,11 @@ const columns: DataTableColumns<any> = [
     const pct = Math.min(100, Math.round(((aiResource.count || 0) / (aiResource.limit || 1)) * 100));
     return h('div', { style: { display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '100px' } }, [
       h('div', { style: { display: 'flex', alignItems: 'center', gap: '6px' } }, [
+        h('span', { style: { fontSize: '12px', color: exhausted ? '#e03050' : '#666' } }, `${pct}%`),
         exhausted
           ? h(NTag, { size: 'small', type: 'error', bordered: false }, { default: () => '已耗尽' })
-          : h('span', { style: { fontSize: '12px', color: '#666' } }, `${pct}%`),
-      ]),
+          : null,
+      ].filter(Boolean)),
       h(NProgress, {
         type: 'line',
         percentage: pct,

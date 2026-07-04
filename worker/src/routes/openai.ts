@@ -13,6 +13,12 @@ const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 
 const MAX_RETRY_PER_ACCOUNT = 1; // 每个账户最多重试 1 次，失败立即换账户
 
+/** Delay before first heartbeat (ms) — only send heartbeat if upstream TTFB exceeds this. */
+const HEARTBEAT_DELAY_MS = 15_000;
+
+/** SSE heartbeat interval (ms) — repeat interval after first heartbeat. */
+const HEARTBEAT_INTERVAL_MS = 10_000;
+
 function isNeuronLimitError(text: string): boolean {
   return text.includes('4006') || text.includes('daily free allocation') || text.includes('neuron limit');
 }
@@ -37,87 +43,101 @@ function upstreamStatusToCode(status: number): string {
 
 const app = new Hono<{ Bindings: Env }>();
 
-async function processWorkerSuccess(
-  c: any, body: any, account: any, cfResp: Response, isStream: boolean, rid: string
-): Promise<Response> {
-  const env: Env = c.env;
+// Helper: write [DONE] to guarantee OpenAI SDK can return
+function writeSseDone(s: any): void {
+  s.write('data: [DONE]\n\n');
+}
 
-  if (isStream) {
-    let streamStatus: 'success' | 'upstream_error' = 'success';
-    let seenDone = false;
-    let finalUsage: any = null;
+/** Send an error as an SSE event (for stream mode when headers already sent). */
+function writeSseError(s: any, errorObj: Record<string, any>): void {
+  s.write(`data: ${JSON.stringify({ error: errorObj })}\n\n`);
+  s.write('data: [DONE]\n\n');
+}
 
-    return stream(c, async (s) => {
-      try {
-        const reader = cfResp.body?.getReader();
-        if (!reader) return;
-        const decoder = new TextDecoder();
-        let buffer = '';
+/**
+ * Pipe CF stream response to an existing Hono stream.
+ * Extracts usage, updates quota, writes audit log.
+ */
+async function pipeCfStream(
+  s: any, body: any, account: any, cfResp: Response, env: Env, rid: string,
+): Promise<void> {
+  let streamStatus: 'success' | 'upstream_error' = 'success';
+  let seenDone = false;
+  let finalUsage: any = null;
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+  try {
+    const reader = cfResp.body?.getReader();
+    if (!reader) return;
+    const decoder = new TextDecoder();
+    let buffer = '';
 
-          // 写入原始 chunk（保持边界）
-          const chunk = decoder.decode(value, { stream: true });
-          await s.write(chunk);
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
 
-          // 同时解析 usage（从累积的 buffer 中提取）
-          buffer += chunk;
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const payload = line.slice(6).trim();
-              if (payload === '[DONE]') {
-                seenDone = true;
-              } else {
-                try {
-                  const json = JSON.parse(payload);
-                  if (json.usage) finalUsage = json.usage;
-                } catch { /* not JSON */ }
-              }
-            }
+      // 写入原始 chunk（保持边界）
+      const chunk = decoder.decode(value, { stream: true });
+      await s.write(chunk);
+
+      // 同时解析 usage（从累积的 buffer 中提取）
+      buffer += chunk;
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const payload = line.slice(6).trim();
+          if (payload === '[DONE]') {
+            seenDone = true;
+          } else {
+            try {
+              const json = JSON.parse(payload);
+              if (json.usage) finalUsage = json.usage;
+            } catch { /* not JSON */ }
           }
         }
-        // 处理剩余 buffer
-        if (buffer) {
-          if (buffer.startsWith('data: ') && buffer.slice(6).trim() === '[DONE]') seenDone = true;
-        }
-        } catch (err: any) {
-        streamStatus = 'upstream_error';
-        logger.error('openai', `[${rid}] Stream error: ${err.message}`);
-      } finally {
-        if (!seenDone) writeSseDone(s);
-
-        // 估算递增 + audit log
-        if (finalUsage) {
-          const cachedTokens = finalUsage.prompt_tokens_details?.cached_tokens || 0;
-          const neurons = estimateNeurons(body.model, finalUsage.prompt_tokens || 0, finalUsage.completion_tokens || 0, cachedTokens);
-          await incrementQuota(env.DB, account.id, 'ai_neurons', neurons);
-          await clearOptimistic(env, account.id);  // 清除乐观预估
-          await invalidateAiCache(env);
-          try {
-            await addAuditLog(env.DB, {
-              account_id: account.id, action: 'ai_chat_completion', target: body.model,
-              detail: `[${rid}] stream tokens: in=${finalUsage.prompt_tokens || 0} out=${finalUsage.completion_tokens || 0} total=${finalUsage.total_tokens || 0} cached=${cachedTokens} neurons=${neurons}`,
-              status: streamStatus === 'success' ? 'success' : 'error',
-            });
-          } catch {}
-        } else {
-          try {
-            await addAuditLog(env.DB, {
-              account_id: account.id, action: 'ai_chat_completion', target: body.model,
-              detail: `[${rid}] stream ${streamStatus} tokens: none (no usage in SSE)`,
-              status: streamStatus === 'success' ? 'success' : 'error',
-            });
-          } catch {}
-        }
       }
-    });
-  }
+    }
+    // 处理剩余 buffer
+    if (buffer) {
+      if (buffer.startsWith('data: ') && buffer.slice(6).trim() === '[DONE]') seenDone = true;
+    }
+  } catch (err: any) {
+    streamStatus = 'upstream_error';
+    logger.error('openai', `[${rid}] Stream error: ${err.message}`);
+  } finally {
+    if (!seenDone) writeSseDone(s);
 
-  // 非流式
+    // 估算递增 + audit log
+    if (finalUsage) {
+      const cachedTokens = finalUsage.prompt_tokens_details?.cached_tokens || 0;
+      const neurons = estimateNeurons(body.model, finalUsage.prompt_tokens || 0, finalUsage.completion_tokens || 0, cachedTokens);
+      await incrementQuota(env.DB, account.id, 'ai_neurons', neurons);
+      await clearOptimistic(env, account.id);  // 清除乐观预估
+      await invalidateAiCache(env);
+      try {
+        await addAuditLog(env.DB, {
+          account_id: account.id, action: 'ai_chat_completion', target: body.model,
+          detail: `[${rid}] stream tokens: in=${finalUsage.prompt_tokens || 0} out=${finalUsage.completion_tokens || 0} total=${finalUsage.total_tokens || 0} cached=${cachedTokens} neurons=${neurons}`,
+          status: streamStatus === 'success' ? 'success' : 'error',
+        });
+      } catch {}
+    } else {
+      try {
+        await addAuditLog(env.DB, {
+          account_id: account.id, action: 'ai_chat_completion', target: body.model,
+          detail: `[${rid}] stream ${streamStatus} tokens: none (no usage in SSE)`,
+          status: streamStatus === 'success' ? 'success' : 'error',
+        });
+      } catch {}
+    }
+  }
+}
+
+/** Process non-stream success: normalize response, estimate neurons, audit log. */
+async function processNonStreamSuccess(
+  c: any, body: any, account: any, cfResp: Response, rid: string
+): Promise<Response> {
+  const env: Env = c.env;
   const data = await cfResp.json() as any;
   if (!data.id) data.id = `chatcmpl-${crypto.randomUUID()}`;
   if (!data.object) data.object = 'chat.completion';
@@ -140,6 +160,28 @@ async function processWorkerSuccess(
     });
   } catch {}
   return c.json(data);
+}
+
+/** Helper: fetch from CF AI with abort timeout. */
+async function fetchCf(account: any, body: any, env: Env, timeoutMs: number): Promise<Response> {
+  const cfUrl = `https://api.cloudflare.com/client/v4/accounts/${account.account_id}/ai/v1/chat/completions`;
+  const headers = await getAuthHeaders(account, env.ENCRYPTION_KEY);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const resp = await fetch(cfUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    return resp;
+  } catch (fetchErr: any) {
+    clearTimeout(timeoutId);
+    if (fetchErr.name === 'AbortError') throw new Error(`Request timeout after ${timeoutMs}ms`);
+    throw fetchErr;
+  }
 }
 
 app.get('/models', async (c) => {
@@ -172,11 +214,6 @@ app.get('/models', async (c) => {
   return c.json({ object: 'list', data });
 });
 
-// Helper: write [DONE] to guarantee OpenAI SDK can return
-function writeSseDone(s: any): void {
-  s.write('data: [DONE]\n\n');
-}
-
 app.post('/chat/completions', async (c) => {
   const specifiedAccountId = c.req.header('X-Account-ID');
   const body = await c.req.json();
@@ -188,34 +225,163 @@ app.post('/chat/completions', async (c) => {
   }
 
   const rid = getRequestId(c);
+  const env = c.env;
+
+  // ================================================================
+  // STREAM MODE — start stream immediately with heartbeat to prevent
+  // client TTFB timeout (CF AI can take 30+ seconds before first byte)
+  // ================================================================
+  if (isStream) {
+    return stream(c, async (s) => {
+      let intervalId: ReturnType<typeof setInterval> | null = null;
+
+      // Delay first heartbeat — most responses arrive before this.
+      const delayId = setTimeout(() => {
+        s.write(': heartbeat\n\n');
+        intervalId = setInterval(() => {
+          s.write(': heartbeat\n\n');
+        }, HEARTBEAT_INTERVAL_MS);
+      }, HEARTBEAT_DELAY_MS);
+
+      const stopHeartbeat = () => {
+        clearTimeout(delayId);
+        if (intervalId) clearInterval(intervalId);
+      };
+
+      try {
+        let lastError = '';
+
+        // --- X-Account-ID specified: use that account directly, no rotation ---
+        if (specifiedAccountId && specifiedAccountId !== 'auto') {
+          const allAccounts = await getActiveAccountsByFeature(env.DB, 'ai');
+          const specified = allAccounts.find(a => a.account_id === specifiedAccountId);
+          if (!specified) {
+            stopHeartbeat();
+            writeSseError(s, { message: `Account ${specifiedAccountId} not found or inactive`, type: 'invalid_request_error', code: 'ACCOUNT_NOT_FOUND' });
+            return;
+          }
+
+          let cfResp: Response;
+          try {
+            cfResp = await fetchCf(specified, body, env, 600000);
+          } catch (netErr: any) {
+            stopHeartbeat();
+            const errMsg = `Network error: ${netErr.message}`;
+            logger.error('openai', `[${rid}] ${errMsg}`);
+            try { await addAuditLog(env.DB, { account_id: specified.id, action: 'ai_chat_completion', target: body.model, detail: `[${rid}] ${errMsg}`, status: 'error' }); } catch {}
+            writeSseError(s, { message: errMsg, type: 'upstream_error', code: 'NETWORK_ERROR' });
+            return;
+          }
+
+          if (!cfResp.ok) {
+            const errorText = await cfResp.text();
+            stopHeartbeat();
+            if (isNeuronLimitError(errorText)) {
+              await setExhausted(env.DB, specified.id, 'ai_neurons');
+              await invalidateAiCache(env);
+            }
+            writeSseError(s, { message: errorText, type: 'upstream_error', code: upstreamStatusToCode(cfResp.status) });
+            return;
+          }
+
+          stopHeartbeat();
+          await pipeCfStream(s, body, specified, cfResp, env, rid);
+          return;
+        }
+
+        // --- while + selectBestAccount rotation loop ---
+        const skipped = new Set<number>();
+        const retryCount = new Map<number, number>();
+
+        while (true) {
+          const account = await selectBestAccount(env, 'ai_neurons', skipped, body.model);
+          if (!account) break;
+          if (!account.account_id) { skipped.add(account.id); continue; }
+
+          let cfResp: Response;
+          try {
+            cfResp = await fetchCf(account, body, env, 600000);
+          } catch (netErr: any) {
+            const errMsg = `Network error: ${netErr.message || netErr}`;
+            logger.warn('openai', `[${rid}] Account ${account.name} ${errMsg}`);
+            lastError = errMsg;
+            try { await addAuditLog(env.DB, { account_id: account.id, action: 'ai_chat_completion', target: body.model, detail: `[${rid}] ${errMsg}`, status: 'error' }); } catch {}
+            const count = (retryCount.get(account.id) || 0) + 1;
+            retryCount.set(account.id, count);
+            if (count >= MAX_RETRY_PER_ACCOUNT) skipped.add(account.id);
+            await new Promise(r => setTimeout(r, 1000));
+            continue;
+          }
+
+          if (!cfResp.ok) {
+            const errorText = await cfResp.text();
+            lastError = errorText;
+
+            if (isRetryableError(cfResp.status, errorText)) {
+              if (isNeuronLimitError(errorText)) {
+                logger.warn('openai', `[${rid}] Account ${account.name} neuron limit hit (4006), rotating`);
+                await setExhausted(env.DB, account.id, 'ai_neurons');
+                await invalidateAiCache(env);
+                try { await addAuditLog(env.DB, { account_id: account.id, action: 'ai_chat_completion', target: body.model, detail: `[${rid}] 4006 switching`, status: 'error' }); } catch {}
+              } else {
+                logger.warn('openai', `[${rid}] Account ${account.name} upstream ${cfResp.status}, rotating`);
+                try { await addAuditLog(env.DB, { account_id: account.id, action: 'ai_chat_completion', target: body.model, detail: `[${rid}] upstream ${cfResp.status}, switching`, status: 'error' }); } catch {}
+              }
+              await new Promise(r => setTimeout(r, 1000));
+              continue;
+            }
+
+            // Non-retryable — send error as SSE
+            stopHeartbeat();
+            writeSseError(s, { message: errorText, type: 'upstream_error', code: upstreamStatusToCode(cfResp.status) });
+            return;
+          }
+
+          // Success — pipe stream
+          stopHeartbeat();
+          await pipeCfStream(s, body, account, cfResp, env, rid);
+          return;
+        }
+
+        // All accounts exhausted
+        stopHeartbeat();
+        logger.error('openai', `[${rid}] All accounts exhausted. Last error: ${lastError}`);
+        writeSseError(s, { message: 'All accounts exhausted', type: 'quota_exceeded', code: 'ALL_ACCOUNTS_EXHAUSTED', last_error: lastError || 'Unknown error' });
+      } finally {
+        stopHeartbeat();
+      }
+    });
+  }
+
+  // ================================================================
+  // NON-STREAM MODE — original logic (no heartbeat needed)
+  // ================================================================
   let lastError = '';
 
   // X-Account-ID 指定账户：直接查该账户，不走循环
   if (specifiedAccountId && specifiedAccountId !== 'auto') {
-    const allAccounts = await getActiveAccountsByFeature(c.env.DB, 'ai');
+    const allAccounts = await getActiveAccountsByFeature(env.DB, 'ai');
     const specified = allAccounts.find(a => a.account_id === specifiedAccountId);
     if (!specified) {
       return c.json({
         error: { message: `Account ${specifiedAccountId} not found or inactive`, type: 'invalid_request_error', code: 'ACCOUNT_NOT_FOUND' },
       }, 404);
     }
-    // 直接请求 CF（单次，不重试）
-    const cfUrl = `https://api.cloudflare.com/client/v4/accounts/${specified.account_id}/ai/v1/chat/completions`;
-    const headers = await getAuthHeaders(specified, c.env.ENCRYPTION_KEY);
     let cfResp: Response;
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), isStream ? 600000 : 300000);
-      cfResp = await fetch(cfUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body), signal: controller.signal });
-      clearTimeout(timeoutId);
+      cfResp = await fetchCf(specified, body, env, 300000);
     } catch (netErr: any) {
       return c.json({ error: { message: `Network error: ${netErr.message}`, type: 'upstream_error', code: 'NETWORK_ERROR' } }, 502);
     }
     if (!cfResp.ok) {
       const errorText = await cfResp.text();
+      if (isNeuronLimitError(errorText)) {
+        await setExhausted(env.DB, specified.id, 'ai_neurons');
+        await invalidateAiCache(env);
+      }
       return c.json({ error: { message: errorText, type: 'upstream_error', code: upstreamStatusToCode(cfResp.status) } }, cfResp.status as any);
     }
-    return await processWorkerSuccess(c, body, specified, cfResp, isStream, rid);
+    return await processNonStreamSuccess(c, body, specified, cfResp, rid);
   }
 
   // while 循环路由
@@ -223,30 +389,18 @@ app.post('/chat/completions', async (c) => {
   const retryCount = new Map<number, number>();
 
   while (true) {
-    const account = await selectBestAccount(c.env, 'ai_neurons', skipped, body.model);
+    const account = await selectBestAccount(env, 'ai_neurons', skipped, body.model);
     if (!account) break;
     if (!account.account_id) { skipped.add(account.id); continue; }
 
-    const cfUrl = `https://api.cloudflare.com/client/v4/accounts/${account.account_id}/ai/v1/chat/completions`;
-    const headers = await getAuthHeaders(account, c.env.ENCRYPTION_KEY);
-
     let cfResp: Response;
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), isStream ? 600000 : 300000);
-      try {
-        cfResp = await fetch(cfUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body), signal: controller.signal });
-        clearTimeout(timeoutId);
-      } catch (fetchErr: any) {
-        clearTimeout(timeoutId);
-        if (fetchErr.name === 'AbortError') throw new Error(`Request timeout after ${isStream ? 600000 : 300000}ms`);
-        throw fetchErr;
-      }
+      cfResp = await fetchCf(account, body, env, 300000);
     } catch (netErr: any) {
       const errMsg = `Network error: ${netErr.message || netErr}`;
       logger.warn('openai', `[${rid}] Account ${account.name} ${errMsg}`);
       lastError = errMsg;
-      try { await addAuditLog(c.env.DB, { account_id: account.id, action: 'ai_chat_completion', target: body.model, detail: `[${rid}] ${errMsg}`, status: 'error' }); } catch {}
+      try { await addAuditLog(env.DB, { account_id: account.id, action: 'ai_chat_completion', target: body.model, detail: `[${rid}] ${errMsg}`, status: 'error' }); } catch {}
       const count = (retryCount.get(account.id) || 0) + 1;
       retryCount.set(account.id, count);
       if (count >= MAX_RETRY_PER_ACCOUNT) skipped.add(account.id);
@@ -261,12 +415,12 @@ app.post('/chat/completions', async (c) => {
       if (isRetryableError(cfResp.status, errorText)) {
         if (isNeuronLimitError(errorText)) {
           logger.warn('openai', `[${rid}] Account ${account.name} neuron limit hit (4006), rotating`);
-          await setExhausted(c.env.DB, account.id, 'ai_neurons');
-          await invalidateAiCache(c.env);
-          try { await addAuditLog(c.env.DB, { account_id: account.id, action: 'ai_chat_completion', target: body.model, detail: `[${rid}] 4006 switching`, status: 'error' }); } catch {}
+          await setExhausted(env.DB, account.id, 'ai_neurons');
+          await invalidateAiCache(env);
+          try { await addAuditLog(env.DB, { account_id: account.id, action: 'ai_chat_completion', target: body.model, detail: `[${rid}] 4006 switching`, status: 'error' }); } catch {}
         } else {
           logger.warn('openai', `[${rid}] Account ${account.name} upstream ${cfResp.status}, rotating`);
-          try { await addAuditLog(c.env.DB, { account_id: account.id, action: 'ai_chat_completion', target: body.model, detail: `[${rid}] upstream ${cfResp.status}, switching`, status: 'error' }); } catch {}
+          try { await addAuditLog(env.DB, { account_id: account.id, action: 'ai_chat_completion', target: body.model, detail: `[${rid}] upstream ${cfResp.status}, switching`, status: 'error' }); } catch {}
         }
         await new Promise(r => setTimeout(r, 1000));
         continue;
@@ -276,7 +430,7 @@ app.post('/chat/completions', async (c) => {
     }
 
     // 成功
-    return await processWorkerSuccess(c, body, account, cfResp, isStream, rid);
+    return await processNonStreamSuccess(c, body, account, cfResp, rid);
   }
 
   // 无账户可用
