@@ -4,6 +4,7 @@ import Cloudflare from 'cloudflare';
 import { getAllAccounts, createAccount, deleteAccount, getAccountById, getAccountByEmail, nameFromEmail, updateAccountStatus, updateAccountId, updateAccountFeatures, AccountInput } from '../models/account';
 import { listAccountsPaged, AccountListFilter } from '../models/account';
 import { encrypt } from '../services/encryptionService';
+import { decrypt } from '../services/encryptionService';
 import { getCfClient } from '../services/cfFactory';
 import { getQuotaSummary } from '../services/quotaTracker';
 import { clearCache } from '../services/accountRouter';
@@ -161,6 +162,34 @@ router.delete('/:id', (req: Request, res: Response, next: NextFunction) => {
     createAuditLog(id, 'delete_account', account.name, null, 'success');
     deleteAccount(id);
     res.json({ success: true });
+  } catch (err) { next(err); }
+});
+
+// ============ 查看账号凭证（解密后的 apiKey / apiToken） ============
+router.get('/:id/credentials', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = parseInt(req.params.id as string, 10);
+    const account = getAccountById(id);
+    if (!account) { res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Account not found' } }); return; }
+    let api_token: string | null = null;
+    let api_key: string | null = null;
+    try {
+      if (account.api_token) api_token = decrypt(account.api_token);
+      if (account.api_key) api_key = decrypt(account.api_key);
+    } catch (e) {
+      appLogger.error(`[Account] 解密凭证失败 id=${id}: ${e}`);
+      res.status(500).json({ error: { code: 'DECRYPT_ERROR', message: '凭证解密失败' } });
+      return;
+    }
+    createAuditLog(id, 'view_credentials', account.name, account.auth_type, 'success');
+    res.json({
+      id: account.id,
+      name: account.name,
+      auth_type: account.auth_type,
+      email: account.email,
+      api_token,
+      api_key,
+    });
   } catch (err) { next(err); }
 });
 

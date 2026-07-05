@@ -22,12 +22,8 @@
 
     <n-space v-if="globalStats.totalAccounts > 0" style="margin: 12px 0; flex-shrink: 0" :wrap="true">
       <n-tag>{{ globalStats.totalAccounts }} 账户</n-tag>
-      <n-tag v-if="globalStats.nearExhaustion > 0" type="warning">
-        {{ globalStats.nearExhaustion }} 快
-      </n-tag>
-      <n-tag v-if="globalStats.exhaustedAccounts > 0" type="error">
-        {{ globalStats.exhaustedAccounts }} 尽
-      </n-tag>
+      <n-tag v-if="globalStats.aiExhausted > 0" type="error">🤖 {{ globalStats.aiExhausted }}</n-tag>
+      <n-tag v-if="globalStats.browserExhausted > 0" type="error">🖥️ {{ globalStats.browserExhausted }}</n-tag>
       <n-tag type="info">
         AI {{ formatCompact(globalStats.aiNeuronsTotal) }} · W {{ formatCompact(globalStats.workersRequestsTotal) }} · R {{ formatCompact(globalStats.browserRenderTotal) }}s
       </n-tag>
@@ -56,6 +52,35 @@
     </n-spin>
 
     <n-h3 style="margin: 0; flex-shrink: 0">最近操作日志</n-h3>
+    <n-space style="flex-shrink: 0" :wrap="true" align="center" :size="8">
+      <n-select
+        v-model:value="logFilter.action"
+        :options="actionOptions"
+        placeholder="操作类型"
+        clearable
+        size="small"
+        style="width: 160px"
+      />
+      <n-date-picker
+        v-model:formatted-value="logFilter.startDate"
+        type="date"
+        value-format="yyyy-MM-dd"
+        placeholder="开始日期"
+        clearable
+        size="small"
+        style="width: 140px"
+      />
+      <n-date-picker
+        v-model:formatted-value="logFilter.endDate"
+        type="date"
+        value-format="yyyy-MM-dd"
+        placeholder="结束日期"
+        clearable
+        size="small"
+        style="width: 140px"
+      />
+      <n-button size="small" type="primary" :loading="loadingLogs" @click="fetchLogs">查询</n-button>
+    </n-space>
     <div class="log-table-wrapper" style="flex: 1; min-height: 0; overflow: auto">
 
         <n-data-table
@@ -72,12 +97,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted, reactive } from 'vue';
 import { useQuotaStore } from '../stores/quotaStore';
 import apiClient from '../api/client';
 import type { DataTableColumns } from 'naive-ui';
 import { formatCN, formatCNShort } from '../utils/dateFormat';
-import { calcPercentage } from '../utils/quota';
 import CompactAccountCard from '../components/CompactAccountCard.vue';
 
 const quotaStore = useQuotaStore();
@@ -148,15 +172,12 @@ const globalStats = computed(() => {
   );
   const totalAccounts = accounts.length;
 
-  const nearExhaustion = accounts.filter((acct: any) =>
-    acct.resources.some((r: any) => {
-      const pct = calcPercentage(r);
-      return pct > 90;
-    }),
+  const aiExhausted = accounts.filter((acct: any) =>
+    acct.resources.some((r: any) => r.resource === 'ai_neurons' && r.exhausted),
   ).length;
 
-  const exhaustedAccounts = accounts.filter((acct: any) =>
-    acct.resources.some((r: any) => r.exhausted),
+  const browserExhausted = accounts.filter((acct: any) =>
+    acct.resources.some((r: any) => r.resource === 'browser_render_seconds' && r.exhausted),
   ).length;
 
   const aiNeuronsTotal = accounts.reduce((sum: number, acct: any) => {
@@ -180,11 +201,33 @@ const globalStats = computed(() => {
     return sum + (r?.count || 0);
   }, 0);
 
-  return { totalAccounts, nearExhaustion, exhaustedAccounts, aiNeuronsTotal, workersRequestsTotal, browserRenderTotal };
+  return { totalAccounts, aiExhausted, browserExhausted, aiNeuronsTotal, workersRequestsTotal, browserRenderTotal };
 });
 
 const auditLogs = ref<any[]>([]);
 const loadingLogs = ref(false);
+const actionOptions = ref<{ label: string; value: string }[]>([]);
+const logFilter = reactive<{ action: string | null; startDate: string | null; endDate: string | null }>({
+  action: null,
+  startDate: null,
+  endDate: null,
+});
+
+async function fetchLogs() {
+  loadingLogs.value = true;
+  try {
+    const params: Record<string, string> = {};
+    if (logFilter.action) params.action = logFilter.action;
+    if (logFilter.startDate) params.startDate = logFilter.startDate;
+    if (logFilter.endDate) params.endDate = logFilter.endDate;
+    const { data } = await apiClient.get('/audit-log', { params });
+    auditLogs.value = data;
+  } catch {
+    auditLogs.value = [];
+  } finally {
+    loadingLogs.value = false;
+  }
+}
 
 const isMobile = computed(() => windowWidth.value < 640);
 
@@ -219,13 +262,11 @@ const scrollX = computed(() => {
 onMounted(async () => {
   window.addEventListener('resize', onResize);
   quotaStore.fetchQuota();
-  loadingLogs.value = true;
   try {
-    const { data } = await apiClient.get('/audit-log');
-    auditLogs.value = data;
-  } finally {
-    loadingLogs.value = false;
-  }
+    const { data } = await apiClient.get('/audit-log/actions');
+    actionOptions.value = data.map((a: string) => ({ label: a, value: a }));
+  } catch { /* ignore */ }
+  await fetchLogs();
 });
 
 onUnmounted(() => {
