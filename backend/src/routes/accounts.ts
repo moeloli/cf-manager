@@ -173,9 +173,11 @@ router.get('/:id/credentials', (req: Request, res: Response, next: NextFunction)
     if (!account) { res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Account not found' } }); return; }
     let api_token: string | null = null;
     let api_key: string | null = null;
+    let password: string | null = null;
     try {
       if (account.api_token) api_token = decrypt(account.api_token);
       if (account.api_key) api_key = decrypt(account.api_key);
+      if (account.password) password = decrypt(account.password);
     } catch (e) {
       appLogger.error(`[Account] 解密凭证失败 id=${id}: ${e}`);
       res.status(500).json({ error: { code: 'DECRYPT_ERROR', message: '凭证解密失败' } });
@@ -189,6 +191,8 @@ router.get('/:id/credentials', (req: Request, res: Response, next: NextFunction)
       email: account.email,
       api_token,
       api_key,
+      password,
+      account_id: account.account_id,
     });
   } catch (err) { next(err); }
 });
@@ -328,6 +332,7 @@ router.post('/import-csv', uploadCsv.single('file'), async (req: Request, res: R
     const header = rows[0].map(h => h.trim().toLowerCase());
     const emailIdx = header.findIndex(h => h === 'email');
     const apiKeyIdx = header.findIndex(h => h === 'apikey' || h === 'api_key');
+    const passwordIdx = header.findIndex(h => h === 'password');
 
     if (emailIdx === -1 || apiKeyIdx === -1) {
       res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'CSV 必须包含 email 和 apiKey 列' } });
@@ -345,6 +350,7 @@ router.post('/import-csv', uploadCsv.single('file'), async (req: Request, res: R
     interface ImportTask {
       email: string;
       apiKey: string;
+      password: string;
       name: string;
       result: { email: string; name: string; status: 'success' | 'skipped' | 'error'; message?: string };
     }
@@ -353,6 +359,7 @@ router.post('/import-csv', uploadCsv.single('file'), async (req: Request, res: R
       const row = dataRows[i];
       const email = (row[emailIdx] || '').trim();
       const apiKey = (row[apiKeyIdx] || '').trim();
+      const password = passwordIdx !== -1 ? (row[passwordIdx] || '').trim() : '';
 
       if (!email || !apiKey) {
         results.push({ email: email || '(空)', name: '', status: 'error', message: '邮箱或 apiKey 为空' });
@@ -370,14 +377,14 @@ router.post('/import-csv', uploadCsv.single('file'), async (req: Request, res: R
         continue;
       }
       pendingTasks.push({
-        email, apiKey, name: nameFromEmail(email),
+        email, apiKey, password, name: nameFromEmail(email),
         result: { email, name: nameFromEmail(email), status: 'success' },
       });
     }
 
     // 处理单个任务：验证凭证 + 入库 + 自动获取 account_id
     async function processTask(task: ImportTask): Promise<void> {
-      const { email, apiKey, name } = task;
+      const { email, apiKey, password, name } = task;
       try {
         // 验证 Cloudflare 凭证（可跳过）
         if (!skipVerify) {
@@ -398,6 +405,7 @@ router.post('/import-csv', uploadCsv.single('file'), async (req: Request, res: R
           auth_type: 'global_key',
           email,
           api_key: encrypt(apiKey),
+          password: password ? encrypt(password) : undefined,
         };
         const id = createAccount(input);
 

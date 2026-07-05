@@ -58,6 +58,7 @@
         :options="actionOptions"
         placeholder="操作类型"
         clearable
+        filterable
         size="small"
         style="width: 160px"
       />
@@ -206,7 +207,39 @@ const globalStats = computed(() => {
 
 const auditLogs = ref<any[]>([]);
 const loadingLogs = ref(false);
-const actionOptions = ref<{ label: string; value: string }[]>([]);
+const ACTION_LABELS: Record<string, string> = {
+  ai_chat_completion: 'AI 对话',
+  browser_render: '浏览器渲染',
+  create_account: '创建账户',
+  import_account: '导入账户',
+  delete_account: '删除账户',
+  update_features: '更新功能',
+  test_account: '测试账户',
+  view_credentials: '查看凭证',
+  clear_exhausted: '清除耗尽',
+  create_dns: '创建DNS',
+  update_dns: '更新DNS',
+  delete_dns: '删除DNS',
+  deploy_worker: '部署Worker',
+  delete_worker: '删除Worker',
+  deploy_pages: '部署Pages',
+  delete_pages: '删除Pages',
+  batch_deploy: '批量部署',
+  batch_deploy_pages: '批量部署Pages',
+  env_sync: '环境同步',
+  kv_write: 'KV操作',
+  task_create: '创建任务',
+  task_delete: '删除任务',
+  task_run: '执行任务',
+};
+const actionOptions = Object.entries(ACTION_LABELS).map(([value, label]) => ({ label, value }));
+function actionLabel(action: string): string {
+  return ACTION_LABELS[action] || action;
+}
+const STATUS_LABELS: Record<string, string> = { success: '成功', error: '失败' };
+function statusLabel(status: string): string {
+  return STATUS_LABELS[status] || status;
+}
 const logFilter = reactive<{ action: string | null; startDate: string | null; endDate: string | null }>({
   action: null,
   startDate: null,
@@ -236,19 +269,19 @@ const logColumns = computed<DataTableColumns<any>>(() => {
     return [
       { title: '时间', key: 'created_at', width: 70, render: (row) => formatCNShort(row.created_at) },
       { title: '账号', key: 'account_name', width: 65, render: (row) => row.account_name || '-' },
-      { title: '操作', key: 'action', width: 60 },
+      { title: '操作', key: 'action', width: 60, render: (row) => actionLabel(row.action) },
       { title: '目标', key: 'target', width: 85, ellipsis: { tooltip: true } },
       { title: '详情', key: 'detail', width: 70, minWidth: 60, ellipsis: { tooltip: true } },
-      { title: '状态', key: 'status', width: 45 },
+      { title: '状态', key: 'status', width: 45, render: (row) => statusLabel(row.status) },
     ];
   }
   return [
-    { title: '时间', key: 'created_at', width: 180, render: (row) => formatCN(row.created_at) },
+    { title: '时间', key: 'created_at', width: 150, render: (row) => formatCN(row.created_at) },
     { title: '账号', key: 'account_name', width: 120, render: (row) => row.account_name || '-' },
-    { title: '操作', key: 'action', width: 150 },
+    { title: '操作', key: 'action', width: 150, render: (row) => actionLabel(row.action) },
     { title: '目标', key: 'target', width: 150, ellipsis: { tooltip: true } },
-    { title: '详情', key: 'detail', width: 160, minWidth: 120, ellipsis: { tooltip: true } },
-    { title: '状态', key: 'status', width: 80 },
+    { title: '详情', key: 'detail', width: 180, minWidth: 120, ellipsis: { tooltip: true } },
+    { title: '状态', key: 'status', width: 80, render: (row) => statusLabel(row.status) },
   ];
 });
 
@@ -262,10 +295,6 @@ const scrollX = computed(() => {
 onMounted(async () => {
   window.addEventListener('resize', onResize);
   quotaStore.fetchQuota();
-  try {
-    const { data } = await apiClient.get('/audit-log/actions');
-    actionOptions.value = data.map((a: string) => ({ label: a, value: a }));
-  } catch { /* ignore */ }
   await fetchLogs();
 });
 

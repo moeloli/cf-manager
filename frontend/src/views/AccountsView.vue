@@ -184,6 +184,15 @@
                 :style="{ fontFamily: 'monospace' }"
               />
             </n-descriptions-item>
+            <n-descriptions-item v-if="credData.password" label="登录密码">
+              <n-input
+                :value="credData.password"
+                type="password"
+                show-password-on="click"
+                readonly
+                :style="{ fontFamily: 'monospace' }"
+              />
+            </n-descriptions-item>
           </n-descriptions>
         </n-space>
       </n-spin>
@@ -228,6 +237,7 @@ const credData = ref<{
   email: string | null;
   api_token: string | null;
   api_key: string | null;
+  password: string | null;
 } | null>(null);
 
 async function handleViewCredentials(row: any) {
