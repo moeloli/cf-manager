@@ -166,37 +166,15 @@ echo "[OK] Dependencies installed"
 # -- Pre-download Stealth Chromium for cloakbrowser --
 echo "[INFO] Pre-downloading Stealth Chromium (this may take a while)..."
 
-# Create a temporary script to trigger Chromium download
-cat > "${INSTALL_DIR}/.download-chromium.mjs" << 'EOF'
-import { launch } from 'cloakbrowser';
-
-async function downloadChromium() {
-    console.log('[Download] Starting Chromium download...');
-    try {
-        const browser = await launch({
-            headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
-        });
-        console.log('[Download] Chromium downloaded successfully!');
-        await browser.close();
-        process.exit(0);
-    } catch (error) {
-        console.error('[Download] Failed to pre-download Chromium:', error.message);
-        console.log('[Download] Chromium will be downloaded on first use instead.');
-        process.exit(0);
-    }
-}
-
-downloadChromium();
-EOF
+# Ensure .download-chromium.mjs is present
+if [ ! -f "${INSTALL_DIR}/.download-chromium.mjs" ]; then
+    curl -fsSL "${RAW_URL}/.download-chromium.mjs" -o "${INSTALL_DIR}/.download-chromium.mjs"
+fi
 
 # Run the download script
 node "${INSTALL_DIR}/.download-chromium.mjs" 2>&1 | while IFS= read -r line; do
     echo "        $line"
 done
-
-# Clean up
-rm -f "${INSTALL_DIR}/.download-chromium.mjs"
 
 echo "[OK] Chromium pre-download step completed"
 

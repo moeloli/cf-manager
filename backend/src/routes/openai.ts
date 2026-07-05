@@ -34,7 +34,16 @@ function upstreamStatusToCode(status: number): string {
 }
 
 function isNeuronLimitError(text: string): boolean {
-  return text.includes('4006') || text.includes('daily free allocation') || text.includes('neuron limit');
+  // 优先解析 JSON 精确匹配 CF 错误码 4006，避免字符串 "4006" 误匹配时间戳/请求ID等
+  try {
+    const json = JSON.parse(text);
+    const errors = json?.errors || json?.result?.errors || (Array.isArray(json) ? json : []);
+    if (Array.isArray(errors) && errors.some((e: any) => e?.code === 4006)) {
+      return true;
+    }
+  } catch { /* 非 JSON，回退到关键词匹配 */ }
+  // 兜底：CF 错误格式变化时通过特异关键词识别
+  return text.includes('daily free allocation') || text.includes('neuron limit');
 }
 
 function writeSseDone(res: Response): void {

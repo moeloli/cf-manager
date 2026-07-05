@@ -20,7 +20,16 @@ const HEARTBEAT_DELAY_MS = 15_000;
 const HEARTBEAT_INTERVAL_MS = 10_000;
 
 function isNeuronLimitError(text: string): boolean {
-  return text.includes('4006') || text.includes('daily free allocation') || text.includes('neuron limit');
+  // 优先解析 JSON 精确匹配 CF 错误码 4006，避免字符串 "4006" 误匹配时间戳/请求ID等
+  try {
+    const json = JSON.parse(text);
+    const errors = json?.errors || json?.result?.errors || (Array.isArray(json) ? json : []);
+    if (Array.isArray(errors) && errors.some((e: any) => e?.code === 4006)) {
+      return true;
+    }
+  } catch { /* 非 JSON，回退到关键词匹配 */ }
+  // 兜底：CF 错误格式变化时通过特异关键词识别
+  return text.includes('daily free allocation') || text.includes('neuron limit');
 }
 
 function isRetryableError(status: number, errorText: string): boolean {
@@ -322,6 +331,7 @@ app.post('/chat/completions', async (c) => {
                 logger.warn('openai', `[${rid}] Account ${account.name} neuron limit hit (4006), rotating`);
                 await setExhausted(env.DB, account.id, 'ai_neurons');
                 await invalidateAiCache(env);
+                skipped.add(account.id);
                 try { await addAuditLog(env.DB, { account_id: account.id, action: 'ai_chat_completion', target: body.model, detail: `[${rid}] 4006 switching`, status: 'error' }); } catch {}
               } else {
                 logger.warn('openai', `[${rid}] Account ${account.name} upstream ${cfResp.status}, rotating`);
@@ -417,6 +427,7 @@ app.post('/chat/completions', async (c) => {
           logger.warn('openai', `[${rid}] Account ${account.name} neuron limit hit (4006), rotating`);
           await setExhausted(env.DB, account.id, 'ai_neurons');
           await invalidateAiCache(env);
+          skipped.add(account.id);
           try { await addAuditLog(env.DB, { account_id: account.id, action: 'ai_chat_completion', target: body.model, detail: `[${rid}] 4006 switching`, status: 'error' }); } catch {}
         } else {
           logger.warn('openai', `[${rid}] Account ${account.name} upstream ${cfResp.status}, rotating`);
