@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import { config } from './config';
 import { initDb } from './db';
@@ -68,7 +68,7 @@ app.use('/api/v1', v1RequestLogger);
 app.use('/api/v1', openaiRouter);
 app.use('/api/v1', v1ErrorHandler); // OpenAI-format error handler (before global errorHandler)
 
-app.get('/api/quota', async (_req, res, next) => {
+app.get('/api/quota', async (_req: Request, res: Response, next: NextFunction) => {
   try {
     await syncUsageFromCloudflare();
     invalidateAiCache();
@@ -76,7 +76,7 @@ app.get('/api/quota', async (_req, res, next) => {
   } catch (err) { next(err); }
 });
 
-app.get('/api/audit-log', (req: Request, res: Response, next: NextFunction) => {
+app.get('/api/audit-log', (req, res, next) => {
   try {
     const { action, startDate, endDate } = req.query as any;
     if (action || startDate || endDate) {
@@ -87,7 +87,7 @@ app.get('/api/audit-log', (req: Request, res: Response, next: NextFunction) => {
   } catch (err) { next(err); }
 });
 
-app.get('/api/audit-log/actions', (_req: Request, res: Response, next: NextFunction) => {
+app.get('/api/audit-log/actions', (_req, res, next) => {
   try {
     res.json(getDistinctActions());
   } catch (err) { next(err); }
