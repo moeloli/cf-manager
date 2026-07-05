@@ -257,10 +257,8 @@ jobs:
               const data = JSON.parse(input);
               // wrangler d1 execute --json 输出为数组，取第一个对象的 ids 字段
               const row = Array.isArray(data) ? data[0] : data;
-              const ids = row && row.results && row.results[0] ? row.results[0].ids
-                        : row && row.ids
-                        : null;
-              if (ids && String(ids).trim()) console.log(String(ids));
+              const ids = row?.results?.[0]?.ids ?? row?.ids ?? null;
+              if (ids !== null && ids !== undefined && String(ids).trim()) console.log(String(ids));
             } catch (e) {
               console.error("JSON 解析失败: " + e.message);
             }
