@@ -1,10 +1,12 @@
 {
+  "password": null,
   "randomPassword": true,
   "count": 1,
   "skipExisting": false,
   "concurrency": 1,
   "headless": true,
   "screenshots": false,
+  "saveHtmlOnError": false,
   "timeout": {
     "register": 60000,
     "verify": 120000,
